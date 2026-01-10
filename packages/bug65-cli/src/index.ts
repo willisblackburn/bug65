@@ -66,13 +66,13 @@ function main() {
         const programData = new Uint8Array(data.slice(offset));
         memory.load(loadAddr, programData);
 
-        console.error(`Memory at $${loadAddr.toString(16)}: ${memory.read(loadAddr).toString(16)} ${memory.read(loadAddr + 1).toString(16)} ${memory.read(loadAddr + 2).toString(16)}`);
-
         // Set Reset Vector to load address
         memory.writeWord(0xFFFC, loadAddr);
 
         // Reset and Run
         cpu.reset();
+
+
         console.error("CPU Reset complete. PC:", cpu.getRegisters().PC.toString(16));
 
         // Initializing host

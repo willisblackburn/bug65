@@ -8,12 +8,15 @@ export class Bug65Host {
     public onWrite: ((val: number) => void) | undefined;
 
     // sim65 addresses
+    private readonly ADDR_LSEEK = 0xFFF1;
+    private readonly ADDR_REMOVE = 0xFFF2;
+    private readonly ADDR_MAPERRNO = 0xFFF3;
+    private readonly ADDR_OPEN = 0xFFF4;
+    private readonly ADDR_CLOSE = 0xFFF5;
+    private readonly ADDR_READ = 0xFFF6;
+    private readonly ADDR_WRITE = 0xFFF7;
+    private readonly ADDR_ARGS = 0xFFF8;
     private readonly ADDR_EXIT = 0xFFF9;
-    private readonly ADDR_PUTC = 0xFFF0;
-    private readonly ADDR_WRITE = 0xFFF4;
-    private readonly ADDR_OPEN = 0xFFF7;
-    private readonly ADDR_CLOSE = 0xFFF6;
-    private readonly ADDR_READ = 0xFFF5;
 
     constructor(cpu: Cpu6502, memory: IMemory) {
         this.cpu = cpu;
@@ -25,78 +28,60 @@ export class Bug65Host {
     }
 
     private handleTrap(pc: number): boolean {
-        // Handle Exit
         if (pc === this.ADDR_EXIT) {
             const exitCode = this.cpu.getRegisters().A;
             if (this.onExit) {
                 this.onExit(exitCode);
             }
-            return true; // Stop execution
-        }
-
-        if (pc === this.ADDR_PUTC) {
-            const char = this.cpu.getRegisters().A;
-            if (this.onWrite) {
-                this.onWrite(char);
-            }
-            return false;
+            return true;
         }
 
         if (pc === this.ADDR_WRITE) {
-            // cc65 sim65 `write` ABI:
-            // AX = buffer address
-            // Y = count
             const regs = this.cpu.getRegisters();
-            const addr = (regs.X << 8) | regs.A;
-            const len = regs.Y;
+            const count = (regs.X << 8) | regs.A; // Count in AX
 
-            // Check for indirect pointer at 'addr' (Zero page)
-            const indirectPtr = (this.memory.read((addr + 1) & 0xFFFF) << 8) | this.memory.read(addr);
+            // Read C Stack Pointer from ZP $00/$01 (Standard cc65)
+            const sp = (this.memory.read(0x01) << 8) | this.memory.read(0x00);
 
-            console.error(`[Bug65Host] WRITE trap: AX=$${addr.toString(16)} (=$${addr}) Len=${len}`);
-            console.error(`[Bug65Host] Indirect Ptr at AX: $${indirectPtr.toString(16)}`);
+            // Stack layout for fastcall write(fd, buf, count):
+            // count (AX)
+            // buf (sp+0) - 2 bytes
+            // fd (sp+2) - 2 bytes
 
-            // Try direct
-            // Dump hex
-            const bytes: number[] = [];
-            for (let i = 0; i < Math.min(len, 16); i++) {
-                bytes.push(this.memory.read(addr + i));
-            }
-            console.error(`[Bug65Host] Direct Content (first 16): ${bytes.map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+            // Note: Since sp points to the last pushed byte?
+            // "The parameter stack is located at the highest available memory address and grows downwards."
+            // Parameters pushed: fd (2 bytes), then buf (2 bytes).
+            // Stack: 
+            // [....]
+            // +1: Buf High
+            // +0: Buf Low  <-- sp
+            // +3: Fd High
+            // +2: Fd Low
 
-            // Try indirect
-            if (indirectPtr > 0) {
-                const iBytes: number[] = [];
-                for (let i = 0; i < Math.min(len, 16); i++) {
-                    iBytes.push(this.memory.read(indirectPtr + i));
+            const buf = (this.memory.read(sp + 1) << 8) | this.memory.read(sp);
+            const fd = (this.memory.read(sp + 3) << 8) | this.memory.read(sp + 2);
+
+            if (buf > 0 && count > 0) {
+                const output: number[] = [];
+                for (let i = 0; i < count; i++) {
+                    output.push(this.memory.read(buf + i));
                 }
-                console.error(`[Bug65Host] Indirect Content: ${iBytes.map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-                console.error(`[Bug65Host] Indirect ASCII: ${iBytes.map(b => b >= 32 && b <= 126 ? String.fromCharCode(b) : '.').join('')}`);
-
-                // If this looks like "Hello", print it!
-                // Heuristic fix for sim65 indirect addressing
-                // Assuming ptr1 usage
-                if (indirectPtr >= 0x200 && len > 0) {
-                    for (let i = 0; i < len; i++) {
-                        const char = this.memory.read(indirectPtr + i);
-                        if (this.onWrite) this.onWrite(char);
-                    }
-                    return false;
-                }
-            }
-
-            // Fallback direct print (if failed above)
-            for (let i = 0; i < len; i++) {
-                const char = this.memory.read(addr + i);
+                // Send to onWrite
                 if (this.onWrite) {
-                    this.onWrite(char);
+                    output.forEach(c => this.onWrite!(c));
                 }
             }
+
+            // We should pop the arguments from the software stack.
+            // sp += 4
+            const newSp = (sp + 4) & 0xFFFF;
+            this.memory.write(0x00, newSp & 0xFF);
+            this.memory.write(0x01, (newSp >> 8) & 0xFF);
+
             return false;
         }
 
         if (pc === this.ADDR_OPEN) {
-            // Return success (0)
             this.cpu.setRegisters({ A: 0, X: 0 });
             return false;
         }
