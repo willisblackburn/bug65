@@ -6,6 +6,7 @@ export class Bug65Host {
     private memory: IMemory;
     public onExit: ((code: number) => void) | undefined;
     public onWrite: ((val: number) => void) | undefined;
+    private spAddress: number = 0x00; // Default to $00 (cc65 default)
 
     // sim65 addresses
     private readonly ADDR_LSEEK = 0xFFF1;
@@ -27,6 +28,11 @@ export class Bug65Host {
         this.cpu.onTrap = (pc: number) => this.handleTrap(pc);
     }
 
+    public setSpAddress(addr: number): void {
+        this.spAddress = addr;
+        console.error(`[Bug65Host] SP ZP Address set to $${addr.toString(16).padStart(2, '0')}`);
+    }
+
     private handleTrap(pc: number): boolean {
         if (pc === this.ADDR_EXIT) {
             const exitCode = this.cpu.getRegisters().A;
@@ -40,8 +46,10 @@ export class Bug65Host {
             const regs = this.cpu.getRegisters();
             const count = (regs.X << 8) | regs.A; // Count in AX
 
-            // Read C Stack Pointer from ZP $00/$01 (Standard cc65)
-            const sp = (this.memory.read(0x01) << 8) | this.memory.read(0x00);
+            // Read C Stack Pointer from ZP (configured via header)
+            // Default 0x00, but header might say otherwise.
+            const spZp = this.spAddress;
+            const sp = (this.memory.read(spZp + 1) << 8) | this.memory.read(spZp);
 
             // Stack layout for fastcall write(fd, buf, count):
             // count (AX)
@@ -75,8 +83,8 @@ export class Bug65Host {
             // We should pop the arguments from the software stack.
             // sp += 4
             const newSp = (sp + 4) & 0xFFFF;
-            this.memory.write(0x00, newSp & 0xFF);
-            this.memory.write(0x01, (newSp >> 8) & 0xFF);
+            this.memory.write(spZp, newSp & 0xFF);
+            this.memory.write(spZp + 1, (newSp >> 8) & 0xFF);
 
             return false;
         }

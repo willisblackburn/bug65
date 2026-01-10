@@ -50,15 +50,39 @@ function main() {
         cpu = new Cpu6502(memory);
 
         // Header check for 'sim65'
+        // Header check for 'sim65'
         const header = data.slice(0, 5).toString('ascii');
         let loadAddr = specifiedLoadAddr !== null ? specifiedLoadAddr : 0x0200;
+        let resetAddr = 0x0200; // Default
+        let spAddr = 0x00; // Default
         let offset = 0;
 
         if (header === 'sim65') {
             offset = 12;
-            console.error("Detected sim65 header. Skipping 12 bytes.");
-            // We could read load address from header, but we don't know the format for sure.
-            // Assuming 0x0200 is standard.
+            console.error("Detected sim65 header. Parsing...");
+
+            // Byte 7: SP Address
+            spAddr = data[7];
+
+            // Bytes 8-9: Load Address (Little Endian)
+            const fileLoadAddr = (data[9] << 8) | data[8];
+
+            // Bytes 10-11: Reset Address (Little Endian)
+            const fileResetAddr = (data[11] << 8) | data[10];
+
+            console.error(`  SP Address: $${spAddr.toString(16).padStart(2, '0')}`);
+            console.error(`  Load Address: $${fileLoadAddr.toString(16).padStart(4, '0')}`);
+            console.error(`  Reset Address: $${fileResetAddr.toString(16).padStart(4, '0')}`);
+
+            if (specifiedLoadAddr === null) {
+                loadAddr = fileLoadAddr;
+                resetAddr = fileResetAddr;
+            } else {
+                // If user specified load address, assume they know what they are doing.
+                // Reset address should probably match load address unless specified otherwise?
+                // Just keep resetAddr as default or file provided?
+                resetAddr = loadAddr; // Force reset to load addr if manual override
+            }
         }
 
         console.error(`Loading at $${loadAddr.toString(16)} (Offset ${offset})`);
@@ -67,7 +91,7 @@ function main() {
         memory.load(loadAddr, programData);
 
         // Set Reset Vector to load address
-        memory.writeWord(0xFFFC, loadAddr);
+        memory.writeWord(0xFFFC, resetAddr);
 
         // Reset and Run
         cpu.reset();
@@ -77,6 +101,7 @@ function main() {
 
         // Initializing host
         const host = new Bug65Host(cpu, memory);
+        host.setSpAddress(spAddr);
         host.install();
 
         host.onExit = (code) => {
