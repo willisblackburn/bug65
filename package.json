@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/bug65-core",
+    "packages/vscode-extension",
+    "packages/bug65-cli"
   ],
   "scripts": {
     "test": "npm test --workspaces",

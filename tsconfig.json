@@ -18,6 +18,9 @@
         },
         {
             "path": "./packages/vscode-extension"
+        },
+        {
+            "path": "./packages/bug65-cli"
         }
     ]
 }
