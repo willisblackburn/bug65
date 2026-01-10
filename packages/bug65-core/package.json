@@ -4,7 +4,7 @@
     "main": "out/src/index.js",
     "types": "out/src/index.d.ts",
     "scripts": {
-        "test": "ts-node test/extended_test.ts",
+        "test": "ts-node test/repro_crash.ts",
         "compile": "tsc -b"
     },
     "devDependencies": {

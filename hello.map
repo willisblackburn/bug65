@@ -1,0 +1,163 @@
+Modules list:
+-------------
+hello.o:
+    CODE              Offs=000000  Size=00000F  Align=00001  Fill=0000
+    RODATA            Offs=000000  Size=00000D  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(_file.o):
+    DATA              Offs=000000  Size=00001E  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(callmain.o):
+    CODE              Offs=00000F  Size=000017  Align=00001  Fill=0000
+    DATA              Offs=00001E  Size=000004  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(condes.o):
+    CODE              Offs=000026  Size=00000C  Align=00001  Fill=0000
+    DATA              Offs=000022  Size=000025  Align=00001  Fill=0000
+    ONCE              Offs=000000  Size=00000C  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(crt0.o):
+    STARTUP           Offs=000000  Size=00001D  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(exehdr.o):
+    EXEHDR            Offs=000000  Size=00000C  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(incsp2.o):
+    CODE              Offs=000032  Size=000016  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(ldaxsp.o):
+    CODE              Offs=000048  Size=000009  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(paravirt.o):
+/Users/wboyce/git/cc65/lib/sim6502.lib(pushax.o):
+    CODE              Offs=000051  Size=00001A  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(pushwsp.o):
+    CODE              Offs=00006B  Size=00001C  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(puts.o):
+    CODE              Offs=000087  Size=000068  Align=00001  Fill=0000
+    DATA              Offs=000047  Size=000001  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(strlen.o):
+    CODE              Offs=0000EF  Size=000016  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(zerobss.o):
+    CODE              Offs=000105  Size=000023  Align=00001  Fill=0000
+/Users/wboyce/git/cc65/lib/sim6502.lib(zeropage.o):
+    ZEROPAGE          Offs=000000  Size=00001A  Align=00001  Fill=0000
+
+
+Segment list:
+-------------
+Name                   Start     End    Size  Align
+----------------------------------------------------
+EXEHDR                000000  00000B  00000C  00001
+ZEROPAGE              000000  000019  00001A  00001
+STARTUP               000200  00021C  00001D  00001
+ONCE                  00021D  000228  00000C  00001
+CODE                  000229  000350  000128  00001
+RODATA                000351  00035D  00000D  00001
+DATA                  00035E  0003A5  000048  00001
+
+
+Exports list by name:
+---------------------
+__BSS_RUN__               0003A6 RLA    __BSS_SIZE__              000000 REA    
+__CONSTRUCTOR_COUNT__     000000 REA    __CONSTRUCTOR_TABLE__     000229 RLA    
+__DESTRUCTOR_COUNT__      000000 REA    __DESTRUCTOR_TABLE__      00035E RLA    
+__EXEHDR__                000001 REA    __MAIN_SIZE__             00F5F0 REA    
+__MAIN_START__            000200 RLA    __STACKSIZE__             000800 REA    
+__STARTUP__               000001 REA    _main                     000229 RLA    
+_puts                     0002B0 RLA    _stdout                   000378 RLA    
+_strlen                   000318 RLA    _write                    00FFF7 RLA    
+callmain                  000238 RLA    donelib                   00024F RLA    
+exit                      00FFF9 RLA    incsp2                    000263 RLA    
+initlib                   00021D RLA    ldaxysp                   000273 RLA    
+ptr1                      000008 RLZ    ptr2                      00000A RLZ    
+pusha0                    00027C RLA    pushax                    00027E RLA    
+pushwysp                  000296 RLA    sp                        000000 RLZ    
+startup                   000200 RLA    zerobss                   00032E RLA    
+
+
+
+Exports list by value:
+----------------------
+__BSS_SIZE__              000000 REA    __CONSTRUCTOR_COUNT__     000000 REA    
+sp                        000000 RLZ    __DESTRUCTOR_COUNT__      000000 REA    
+__EXEHDR__                000001 REA    __STARTUP__               000001 REA    
+ptr1                      000008 RLZ    ptr2                      00000A RLZ    
+startup                   000200 RLA    __MAIN_START__            000200 RLA    
+initlib                   00021D RLA    __CONSTRUCTOR_TABLE__     000229 RLA    
+_main                     000229 RLA    callmain                  000238 RLA    
+donelib                   00024F RLA    incsp2                    000263 RLA    
+ldaxysp                   000273 RLA    pusha0                    00027C RLA    
+pushax                    00027E RLA    pushwysp                  000296 RLA    
+_puts                     0002B0 RLA    _strlen                   000318 RLA    
+zerobss                   00032E RLA    __DESTRUCTOR_TABLE__      00035E RLA    
+_stdout                   000378 RLA    __BSS_RUN__               0003A6 RLA    
+__STACKSIZE__             000800 REA    __MAIN_SIZE__             00F5F0 REA    
+_write                    00FFF7 RLA    exit                      00FFF9 RLA    
+
+
+
+Imports list:
+-------------
+__BSS_RUN__ ([linker generated]):
+    zerobss.o                 common/zerobss.s:8
+__BSS_SIZE__ ([linker generated]):
+    zerobss.o                 common/zerobss.s:8
+__CONSTRUCTOR_COUNT__ ([linker generated]):
+    condes.o                  runtime/condes.s:18
+__CONSTRUCTOR_TABLE__ ([linker generated]):
+    condes.o                  runtime/condes.s:18
+__DESTRUCTOR_COUNT__ ([linker generated]):
+    condes.o                  runtime/condes.s:19
+__DESTRUCTOR_TABLE__ ([linker generated]):
+    condes.o                  runtime/condes.s:19
+__EXEHDR__ (exehdr.o):
+    [linker generated]        /Users/wboyce/git/cc65/cfg/sim6502.cfg:2
+__MAIN_SIZE__ ([linker generated]):
+    crt0.o                    sim6502/crt0.s:13
+__MAIN_START__ ([linker generated]):
+    exehdr.o                  sim6502/exehdr.s:9
+    crt0.o                    sim6502/crt0.s:13
+__STACKSIZE__ ([linker generated]):
+    crt0.o                    sim6502/crt0.s:14
+    [linker generated]        /Users/wboyce/git/cc65/cfg/sim6502.cfg:8
+__STARTUP__ (crt0.o):
+    hello.o                   hello.s:13
+_main (hello.o):
+    callmain.o                runtime/callmain.s:11
+_puts (puts.o):
+    hello.o                   hello.s:14
+_stdout (_file.o):
+    puts.o                    ../libwrk/sim6502/puts.s:13
+_strlen (strlen.o):
+    puts.o                    ../libwrk/sim6502/puts.s:15
+_write (paravirt.o):
+    puts.o                    ../libwrk/sim6502/puts.s:16
+callmain (callmain.o):
+    crt0.o                    sim6502/crt0.s:10
+donelib (condes.o):
+    crt0.o                    sim6502/crt0.s:11
+exit (paravirt.o):
+    crt0.o                    sim6502/crt0.s:12
+incsp2 (incsp2.o):
+    puts.o                    ../libwrk/sim6502/puts.s:79
+initlib (condes.o):
+    crt0.o                    sim6502/crt0.s:11
+ldaxysp (ldaxsp.o):
+    puts.o                    ../libwrk/sim6502/puts.s:79
+ptr1 (zeropage.o):
+    zerobss.o                 common/zerobss.s:9
+    puts.o                    ../libwrk/sim6502/puts.s:11
+ptr2 (zeropage.o):
+    strlen.o                  common/strlen.s:12
+pusha0 (pushax.o):
+    puts.o                    ../libwrk/sim6502/puts.s:79
+pushax (pushax.o):
+    callmain.o                runtime/callmain.s:11
+    puts.o                    ../libwrk/sim6502/puts.s:79
+pushwysp (pushwsp.o):
+    puts.o                    ../libwrk/sim6502/puts.s:79
+sp (zeropage.o):
+    pushwsp.o                 runtime/pushwsp.s:8
+    pushax.o                  runtime/pushax.s:8
+    ldaxsp.o                  runtime/ldaxsp.s:8
+    incsp2.o                  runtime/incsp2.s:8
+    exehdr.o                  sim6502/exehdr.s:8
+    crt0.o                    /Users/wboyce/git/cc65/asminc/zeropage.inc:11
+startup (crt0.o):
+    exehdr.o                  sim6502/exehdr.s:10
+zerobss (zerobss.o):
+    crt0.o                    sim6502/crt0.s:10
+

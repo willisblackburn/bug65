@@ -1,32 +1,53 @@
 
-import { Cpu6502, Memory, Flags } from 'bug65-core';
+import { Cpu6502, Memory, Flags, Bug65Host } from 'bug65-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
 function printHelp() {
-    console.log("Usage: bug65 <program.bin> [start_address_hex]");
-    console.log("Example: bug65 program.bin 0200");
+    console.log("Usage: bug65 [--trace|-t] <program.bin> [start_address_hex]");
+    console.log("Example: bug65 --trace program.bin 0200");
 }
 
 function main() {
     const args = process.argv.slice(2);
-    if (args.length < 1) {
+
+    let trace = false;
+    let programPath: string | null = null;
+    let specifiedLoadAddr: number | null = null;
+
+    // Parse args
+    for (let i = 0; i < args.length; i++) {
+        if (args[i] === '--trace' || args[i] === '-t') {
+            trace = true;
+        } else if (!programPath) {
+            programPath = args[i];
+        } else if (specifiedLoadAddr === null) {
+            specifiedLoadAddr = parseInt(args[i], 16);
+        }
+    }
+
+    if (!programPath) {
         printHelp();
         process.exit(1);
     }
-
-    const programPath = args[0];
-    let specifiedLoadAddr = args.length > 1 ? parseInt(args[1], 16) : null;
 
     if (!fs.existsSync(programPath)) {
         console.error(`Error: File not found: ${programPath}`);
         process.exit(1);
     }
 
+    let cpu: Cpu6502 | null = null;
+    let memory: Memory | null = null;
+
+    console.error("Starting...");
+
     try {
+        console.error("Reading file:", programPath);
         const data = fs.readFileSync(programPath);
-        const memory = new Memory();
-        const cpu = new Cpu6502(memory);
+        console.error("File read size:", data.length);
+
+        memory = new Memory();
+        cpu = new Cpu6502(memory);
 
         // Header check for 'sim65'
         const header = data.slice(0, 5).toString('ascii');
@@ -35,43 +56,77 @@ function main() {
 
         if (header === 'sim65') {
             offset = 12;
-            if (specifiedLoadAddr === null) {
-                // sim65 binary likely assumes 0x0200 or is relocatable?
-                // Standard sim65 usually has simple header. 
-                // We stick to 0x0200 default if not specified.
-            }
+            console.error("Detected sim65 header. Skipping 12 bytes.");
+            // We could read load address from header, but we don't know the format for sure.
+            // Assuming 0x0200 is standard.
         }
+
+        console.error(`Loading at $${loadAddr.toString(16)} (Offset ${offset})`);
 
         const programData = new Uint8Array(data.slice(offset));
         memory.load(loadAddr, programData);
+
+        console.error(`Memory at $${loadAddr.toString(16)}: ${memory.read(loadAddr).toString(16)} ${memory.read(loadAddr + 1).toString(16)} ${memory.read(loadAddr + 2).toString(16)}`);
 
         // Set Reset Vector to load address
         memory.writeWord(0xFFFC, loadAddr);
 
         // Reset and Run
         cpu.reset();
+        console.error("CPU Reset complete. PC:", cpu.getRegisters().PC.toString(16));
 
-        // Set up trap
-        cpu.onTrap = (pc: number) => {
-            if (pc === 0xFFF9) {
-                const exitCode = cpu.getRegisters().A;
-                // console.log(`Exited with code: ${exitCode}`);
-                process.exit(exitCode);
-                return true;
-            }
-            return false;
+        // Initializing host
+        const host = new Bug65Host(cpu, memory);
+        host.install();
+
+        host.onExit = (code) => {
+            process.exit(code);
         };
 
+        host.onWrite = (char) => {
+            process.stdout.write(String.fromCharCode(char));
+        };
+
+        // Ensure RTS at hook addresses
+        // This allows 'virtual' subroutine calls to return if we don't return true in trap
+        // Map all common sim65 vectors to RTS
+        for (let addr = 0xFFF0; addr <= 0xFFF9; addr++) {
+            memory.write(addr, 0x60); // RTS
+        }
+
         // Run loop
-        // We use a simple loop here. For very long running programs this might block,
-        // but for a CLI simulator it's usually fine to run fast-as-possible.
 
         while (true) {
+            if (trace && cpu) {
+                const regs = cpu.getRegisters();
+                const opcode = memory.read(regs.PC);
+                console.error(`${regs.PC.toString(16).toUpperCase().padStart(4, '0')}  ${opcode.toString(16).toUpperCase().padStart(2, '0')}  A:${regs.A.toString(16).toUpperCase().padStart(2, '0')} X:${regs.X.toString(16).toUpperCase().padStart(2, '0')} Y:${regs.Y.toString(16).toUpperCase().padStart(2, '0')} P:${regs.Status.toString(16).toUpperCase().padStart(2, '0')} SP:${regs.SP.toString(16).toUpperCase().padStart(2, '0')}`);
+            }
+            // Check for FFF7 manually here or add to host
             cpu.step();
         }
 
     } catch (e: any) {
-        console.error(`Error executing program: ${e.message}`);
+        console.error(`\nError executing program: ${e.message}`);
+
+        if (cpu && memory) {
+            const pc = cpu.getRegisters().PC;
+            console.error(`PC: $${pc.toString(16).toUpperCase()}`);
+            console.error(`Registers: A=$${cpu.getRegisters().A.toString(16).toUpperCase()} X=$${cpu.getRegisters().X.toString(16).toUpperCase()} Y=$${cpu.getRegisters().Y.toString(16).toUpperCase()} SP=$${cpu.getRegisters().SP.toString(16).toUpperCase()} P=$${cpu.getRegisters().Status.toString(16).toUpperCase()}`);
+
+            // Dump memory around PC
+            console.error("Memory near PC:");
+            const start = Math.max(0, pc - 8);
+            const end = Math.min(0xFFFF, pc + 8);
+            let dump = "";
+            for (let i = start; i <= end; i++) {
+                const val = memory.read(i).toString(16).toUpperCase().padStart(2, '0');
+                if (i === pc) dump += ` [${val}]`;
+                else dump += ` ${val}`;
+            }
+            console.error(`$${start.toString(16).toUpperCase()}: ${dump}`);
+        }
+
         process.exit(1);
     }
 }

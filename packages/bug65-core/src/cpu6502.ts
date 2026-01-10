@@ -480,6 +480,20 @@ export class Cpu6502 implements ICpu {
         this.setFlag(Flags.Negative, (result & 0x80) !== 0);
     }
 
+    public setRegisters(regs: Partial<CpuRegisters>): void {
+        if (regs.A !== undefined) this.A = regs.A;
+        if (regs.X !== undefined) this.X = regs.X;
+        if (regs.Y !== undefined) this.Y = regs.Y;
+        if (regs.PC !== undefined) this.PC = regs.PC;
+        if (regs.SP !== undefined) this.SP = regs.SP;
+        // Status?
+        if (regs.Status !== undefined) this.setFlags(regs.Status);
+    }
+
+    private setFlags(flags: number): void {
+        this.Status = flags; // Directly set the status register
+    }
+
     // Logical
     protected AND(value: number): void {
         this.A &= value;
