@@ -1,4 +1,4 @@
-# bug65 (6502 Simulator & Debugger)
+# bug65: 6502/65C02 simulator and debugger for Visual Studio Code
 
 **bug65** is a Visual Studio Code extension and core library that acts as a simulator and debugger for the 6502/65C02 microprocessor. It is designed to integrate seamlessly with the [cc65](https://cc65.github.io/) tool suite, providing a modern alternative to `sim65` for debugging unit tests and programs directly within VS Code.
 
