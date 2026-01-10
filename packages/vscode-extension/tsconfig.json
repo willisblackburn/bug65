@@ -1,0 +1,31 @@
+{
+    "compilerOptions": {
+        "module": "commonjs",
+        "target": "es2020",
+        "outDir": "out",
+        "lib": [
+            "es2020"
+        ],
+        "sourceMap": true,
+        "strict": true,
+        "composite": true,
+        "rootDir": "src",
+        "types": [
+            "vscode"
+        ],
+        "baseUrl": ".",
+        "paths": {
+            "bug65-core": [
+                "../bug65-core/src/index.ts"
+            ]
+        }
+    },
+    "include": [
+        "src/**/*"
+    ],
+    "references": [
+        {
+            "path": "../bug65-core"
+        }
+    ]
+}

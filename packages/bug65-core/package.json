@@ -1,0 +1,14 @@
+{
+    "name": "bug65-core",
+    "version": "0.1.0",
+    "main": "out/index.js",
+    "types": "out/index.d.ts",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "compile": "tsc -b"
+    },
+    "devDependencies": {
+        "typescript": "^5.0.0",
+        "@types/node": "^18.0.0"
+    }
+}

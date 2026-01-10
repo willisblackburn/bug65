@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build Output
+out/
+dist/
+*.vsix
+
+# VS Code
+.vscode/
+.vscode-test/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/

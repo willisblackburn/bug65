@@ -1,0 +1,64 @@
+{
+    "name": "vscode-bug65-debugger",
+    "displayName": "Bug65 Debugger",
+    "version": "0.1.0",
+    "publisher": "bug65-vscode",
+    "description": "Visual Studio Code Debug Adapter for bug65",
+    "author": {
+        "name": "bug65-vscode"
+    },
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "categories": [
+        "Debuggers"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "debuggers": [
+            {
+                "type": "bug65",
+                "label": "Bug65 Debugger",
+                "program": "./out/debugAdapter.js",
+                "runtime": "node",
+                "configurationAttributes": {
+                    "launch": {
+                        "required": [
+                            "program"
+                        ],
+                        "properties": {
+                            "program": {
+                                "type": "string",
+                                "description": "Absolute path to a bug65 program.",
+                                "default": "${workspaceFolder}/program.bin"
+                            }
+                        }
+                    }
+                },
+                "initialConfigurations": [
+                    {
+                        "type": "bug65",
+                        "request": "launch",
+                        "name": "Run Bug65 Program",
+                        "program": "${workspaceFolder}/program.bin"
+                    }
+                ]
+            }
+        ]
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -b",
+        "watch": "tsc -b -w"
+    },
+    "devDependencies": {
+        "typescript": "^5.0.0",
+        "@types/node": "^18.0.0",
+        "@types/vscode": "^1.75.0"
+    },
+    "dependencies": {
+        "bug65-core": "*",
+        "vscode-debugadapter": "^1.51.0",
+        "vscode-debugprotocol": "^1.51.0"
+    }
+}
