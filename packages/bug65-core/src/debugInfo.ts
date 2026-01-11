@@ -259,4 +259,28 @@ export class DebugInfoParser {
         if (str.startsWith('0x')) return parseInt(str, 16);
         return parseInt(str);
     }
+
+    public static resolveDebugFile(programPath: string): string | undefined {
+        // (a) try the executable name plus '.dbg'
+        // (b) try removing any extension (but only if present) and replacing with '.dbg'
+
+        const path = require('path');
+        const fs = require('fs');
+
+        const candidates: string[] = [];
+        candidates.push(programPath + '.dbg');
+
+        const ext = path.extname(programPath);
+        if (ext) {
+            candidates.push(programPath.slice(0, -ext.length) + '.dbg');
+        }
+
+        for (const c of candidates) {
+            if (fs.existsSync(c)) {
+                return c;
+            }
+        }
+
+        return undefined;
+    }
 }

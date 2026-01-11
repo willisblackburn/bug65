@@ -151,18 +151,8 @@ function main() {
                 console.error(`Warning: Specified debug file not found: ${dbgFileArg}`);
             }
         } else {
-            const ext = path.extname(programPath);
-            const candidates = [
-                programPath.slice(0, -ext.length) + '.dbg',
-                programPath + '.dbg'
-            ];
 
-            for (const c of candidates) {
-                if (fs.existsSync(c)) {
-                    dbgPath = c;
-                    break;
-                }
-            }
+            dbgPath = DebugInfoParser.resolveDebugFile(programPath) || null;
         }
 
 

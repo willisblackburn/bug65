@@ -150,10 +150,13 @@ export class Bug65DebugSession extends LoggingDebugSession {
                     if (lineInfo && lineInfo.spanId !== undefined) {
                         const span = this._debugInfo.spans.get(lineInfo.spanId);
                         if (span) {
-                            const addr = span.start;
-                            this._cpu.addBreakpoint(addr);
-                            actualBreakpoints.push(new Breakpoint(true, l, 0, new Source(path, path)));
-                            continue;
+                            const seg = this._debugInfo.segments.get(span.segId);
+                            if (seg) {
+                                const addr = seg.start + span.start;
+                                this._cpu.addBreakpoint(addr);
+                                actualBreakpoints.push(new Breakpoint(true, l, 0, new Source(path, path)));
+                                continue;
+                            }
                         }
                     }
                     actualBreakpoints.push(new Breakpoint(false, l, 0, new Source(path, path)));
@@ -177,18 +180,18 @@ export class Bug65DebugSession extends LoggingDebugSession {
     private _debugInfo: DebugInfo | undefined;
 
     private loadDebugInfo(programPath: string) {
-        // Look for .dbg file
-        const ext = path.extname(programPath);
-        const dbgPath = programPath.slice(0, -ext.length) + '.dbg';
-        if (fs.existsSync(dbgPath)) {
+        const dbgPath = DebugInfoParser.resolveDebugFile(programPath);
+        if (dbgPath) {
             try {
-                const content = fs.readFileSync(dbgPath, 'utf-8');
-                this._debugInfo = DebugInfoParser.parse(content);
+                const debugObj = DebugInfoParser.parse(fs.readFileSync(dbgPath, 'utf8'));
+                this._debugInfo = debugObj;
                 this._disassembler = new Disassembler6502(this._debugInfo);
                 this.sendEvent(new OutputEvent(`[Bug65] Loaded debug info: ${dbgPath}\n`, 'console'));
             } catch (e) {
                 this.sendEvent(new OutputEvent(`[Bug65] Failed to parse debug info: ${e}\n`, 'stderr'));
             }
+        } else {
+            this._disassembler = new Disassembler6502();
         }
     }
 
