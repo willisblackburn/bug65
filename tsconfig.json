@@ -21,6 +21,9 @@
         },
         {
             "path": "./packages/bug65-cli"
+        },
+        {
+            "path": "./packages/test-extension"
         }
     ]
 }

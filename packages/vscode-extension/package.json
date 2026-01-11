@@ -13,8 +13,17 @@
     "categories": [
         "Debuggers"
     ],
+    "activationEvents": [
+        "onDebug:bug65"
+    ],
     "main": "./out/extension.js",
     "contributes": {
+        "commands": [
+            {
+                "command": "vscode-bug65-debugger.helloWorld",
+                "title": "Bug65: Hello World"
+            }
+        ],
         "debuggers": [
             {
                 "type": "bug65",

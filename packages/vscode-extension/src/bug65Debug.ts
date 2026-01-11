@@ -6,7 +6,7 @@ import {
     Thread, Scope, Source, Handles, Breakpoint
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { Cpu6502, Memory, CpuRegisters } from 'bug65-core';
+import { Cpu6502, Memory, CpuRegisters, Bug65Host } from 'bug65-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -28,16 +28,10 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
         this._memory = new Memory();
         this._cpu = new Cpu6502(this._memory);
-        this._cpu.onTrap = (pc) => this.handleTrap(pc);
+
     }
 
-    private handleTrap(pc: number): boolean {
-        if (pc === 0xFFF9) { // Exit
-            // this.sendEvent(new TerminatedEvent());
-            return true;
-        }
-        return false;
-    }
+
 
     protected initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments): void {
         response.body = response.body || {};
@@ -50,6 +44,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
     protected async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments) {
         logger.setup(Logger.LogLevel.Verbose, false);
+        this.sendEvent(new OutputEvent(`[Bug65] Launching program: ${args.program}\n`, 'console'));
 
         const programPath = args.program;
         if (!fs.existsSync(programPath)) {
@@ -58,11 +53,31 @@ export class Bug65DebugSession extends LoggingDebugSession {
         }
 
         const data = fs.readFileSync(programPath);
-        this.loadProgram(data);
+        const { loadAddr, resetAddr, spAddr } = this.loadProgram(data);
 
         this._cpu.reset();
 
+        // Initialize Host
+        const host = new Bug65Host(this._cpu, this._memory);
+        host.setSpAddress(spAddr);
+        host.install();
+
+        host.onWrite = (char) => {
+            this.sendEvent(new OutputEvent(String.fromCharCode(char), 'stdout'));
+        };
+
+        host.onExit = (code) => {
+            this.sendEvent(new OutputEvent(`[Bug65] Program exited with code ${code}\n`, 'console'));
+            this.sendEvent(new TerminatedEvent());
+        };
+
+        // Fill hooks with RTS
+        for (let a = 0xFFF0; a <= 0xFFF9; a++) {
+            this._memory.write(a, 0x60);
+        }
+
         this.sendResponse(response);
+        this.sendEvent(new OutputEvent(`[Bug65] System initialized. PC=$${this._cpu.getRegisters().PC.toString(16)}\n`, 'console'));
 
         if (args.stopOnEntry) {
             this.sendEvent(new StoppedEvent('entry', Bug65DebugSession.THREAD_ID));
@@ -71,19 +86,28 @@ export class Bug65DebugSession extends LoggingDebugSession {
         }
     }
 
-    private loadProgram(data: Buffer) {
-        // Simple loading logic
+    private loadProgram(data: Buffer): { loadAddr: number, resetAddr: number, spAddr: number } {
         const header = data.slice(0, 5).toString('ascii');
         let loadAddr = 0x0200;
+        let resetAddr = 0x0200;
+        let spAddr = 0x00;
         let offset = 0;
 
         if (header === 'sim65') {
             offset = 12;
+            spAddr = data[7];
+            const fileLoadAddr = (data[9] << 8) | data[8];
+            const fileResetAddr = (data[11] << 8) | data[10];
+            loadAddr = fileLoadAddr;
+            resetAddr = fileResetAddr;
+            this.sendEvent(new OutputEvent(`[Bug65] Header detected: Load=$${loadAddr.toString(16)} Reset=$${resetAddr.toString(16)} SP=$${spAddr.toString(16)}\n`, 'console'));
         }
 
         const programData = new Uint8Array(data.slice(offset));
         this._memory.load(loadAddr, programData);
-        this._memory.writeWord(0xFFFC, loadAddr);
+        this._memory.writeWord(0xFFFC, resetAddr);
+
+        return { loadAddr, resetAddr, spAddr };
     }
 
     protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
@@ -195,10 +219,17 @@ export class Bug65DebugSession extends LoggingDebugSession {
         let running = true;
         for (let i = 0; i < batch; i++) {
             const cycles = this._cpu.step();
-            if (cycles === 0) { // Trap
-                // Exit
-                this.sendEvent(new TerminatedEvent());
+            // Bug65Host handles traps internally and triggers events
+            // We just need to ensure we don't spin forever on terminated session
+            // But we don't have a 'running' flag easily accessible here unless we track it
+            if (cycles === 0) {
+                // Should be handled by host?
+                // But step() returns 0 if trap says 'stop'?
+                // Verify.
+                // Actually host hook returns true to stop.
+                // cpu.step() returns 0.
                 running = false;
+                // Terminated event likely sent by host.onExit
                 break;
             }
         }

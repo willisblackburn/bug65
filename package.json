@@ -5,12 +5,14 @@
   "workspaces": [
     "packages/bug65-core",
     "packages/vscode-extension",
-    "packages/bug65-cli"
+    "packages/bug65-cli",
+    "packages/test-extension"
   ],
   "scripts": {
     "test": "npm test --workspaces",
     "compile": "tsc -b",
-    "watch": "tsc -b -w"
+    "watch": "tsc -b -w",
+    "clean": "rm -rf packages/*/out packages/*/tsconfig.tsbuildinfo tsconfig.tsbuildinfo"
   },
   "devDependencies": {
     "@types/node": "^25.0.6",
