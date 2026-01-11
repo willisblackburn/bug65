@@ -20,6 +20,7 @@ export class Disassembler6502 {
         let len = 1;
         let operandStr = '';
         const bytes = [opcode];
+        const isCodeStr = (entry.mode === 'rel' || entry.mode === 'ind' || (entry.mode === 'abs' && (entry.name === 'JMP' || entry.name === 'JSR')));
 
         // Fetch operands based on mode
         switch (entry.mode) {
@@ -37,7 +38,7 @@ export class Disassembler6502 {
                 bytes.push(memory.read(pc + 1));
                 {
                     const addr = bytes[1];
-                    const sym = this.resolveSymbol(addr);
+                    const sym = this.resolveSymbol(addr, false);
                     operandStr = sym ? sym : `$${addr.toString(16).toUpperCase().padStart(2, '0')}`;
                 }
                 break;
@@ -46,7 +47,7 @@ export class Disassembler6502 {
                 bytes.push(memory.read(pc + 1));
                 {
                     const addr = bytes[1];
-                    const sym = this.resolveSymbol(addr);
+                    const sym = this.resolveSymbol(addr, false);
                     operandStr = (sym ? sym : `$${addr.toString(16).toUpperCase().padStart(2, '0')}`) + ',X';
                 }
                 break;
@@ -55,7 +56,7 @@ export class Disassembler6502 {
                 bytes.push(memory.read(pc + 1));
                 {
                     const addr = bytes[1];
-                    const sym = this.resolveSymbol(addr);
+                    const sym = this.resolveSymbol(addr, false);
                     operandStr = (sym ? sym : `$${addr.toString(16).toUpperCase().padStart(2, '0')}`) + ',Y';
                 }
                 break;
@@ -65,7 +66,7 @@ export class Disassembler6502 {
                 bytes.push(memory.read(pc + 2));
                 {
                     const addr = (bytes[2] << 8) | bytes[1];
-                    const sym = this.resolveSymbol(addr);
+                    const sym = this.resolveSymbol(addr, isCodeStr);
                     operandStr = sym ? sym : `$${addr.toString(16).toUpperCase().padStart(4, '0')}`;
                 }
                 break;
@@ -75,7 +76,7 @@ export class Disassembler6502 {
                 bytes.push(memory.read(pc + 2));
                 {
                     const addr = (bytes[2] << 8) | bytes[1];
-                    const sym = this.resolveSymbol(addr);
+                    const sym = this.resolveSymbol(addr, false);
                     operandStr = (sym ? sym : `$${addr.toString(16).toUpperCase().padStart(4, '0')}`) + ',X';
                 }
                 break;
@@ -85,7 +86,7 @@ export class Disassembler6502 {
                 bytes.push(memory.read(pc + 2));
                 {
                     const addr = (bytes[2] << 8) | bytes[1];
-                    const sym = this.resolveSymbol(addr);
+                    const sym = this.resolveSymbol(addr, false);
                     operandStr = (sym ? sym : `$${addr.toString(16).toUpperCase().padStart(4, '0')}`) + ',Y';
                 }
                 break;
@@ -95,7 +96,7 @@ export class Disassembler6502 {
                 bytes.push(memory.read(pc + 2));
                 {
                     const addr = (bytes[2] << 8) | bytes[1];
-                    const sym = this.resolveSymbol(addr);
+                    const sym = this.resolveSymbol(addr, true);
                     operandStr = `(${sym ? sym : '$' + addr.toString(16).toUpperCase().padStart(4, '0')})`;
                 }
                 break;
@@ -104,7 +105,7 @@ export class Disassembler6502 {
                 bytes.push(memory.read(pc + 1));
                 {
                     const addr = bytes[1];
-                    const sym = this.resolveSymbol(addr);
+                    const sym = this.resolveSymbol(addr, false);
                     operandStr = `(${sym ? sym : '$' + addr.toString(16).toUpperCase().padStart(2, '0')},X)`;
                 }
                 break;
@@ -113,7 +114,7 @@ export class Disassembler6502 {
                 bytes.push(memory.read(pc + 1));
                 {
                     const addr = bytes[1];
-                    const sym = this.resolveSymbol(addr);
+                    const sym = this.resolveSymbol(addr, false);
                     operandStr = `(${sym ? sym : '$' + addr.toString(16).toUpperCase().padStart(2, '0')}),Y`;
                 }
                 break;
@@ -124,7 +125,7 @@ export class Disassembler6502 {
                     let offset = bytes[1];
                     if (offset > 127) offset -= 256;
                     const dest = (pc + 2 + offset) & 0xFFFF;
-                    const sym = this.resolveSymbol(dest);
+                    const sym = this.resolveSymbol(dest, true);
                     operandStr = sym ? sym : `$${dest.toString(16).toUpperCase().padStart(4, '0')}`;
                 }
                 break;
@@ -139,9 +140,29 @@ export class Disassembler6502 {
         return { asm: asm.padEnd(20), bytes, count: len };
     }
 
-    private resolveSymbol(addr: number): string | undefined {
+    private resolveSymbol(addr: number, isCode: boolean): string | undefined {
         if (!this.debugInfo) return undefined;
         const sym = this.debugInfo.getSymbolForAddress(addr);
+
+        // Exact match label logic
+        // If we found a label (or segment-based symbol), use it immediately without +1 logic?
+        // Actually user said: "if there is no label defined ... but ... immediately preceeding".
+        // And "This is also wrong. It should be 'ROL ptr1+1'". (Where PVM_CALL was likely an equate).
+        // So if sym is type 'equ' (or similar), we might prefer 'lab+1' if !isCode.
+
+        if (sym && (sym.type === 'lab' || sym.symType === 'lab' || sym.segId !== undefined)) {
+            return sym.name;
+        }
+
+        if (!isCode) {
+            // Try addr - 1
+            const prev = this.debugInfo.getSymbolForAddress(addr - 1);
+            if (prev && (prev.type === 'lab' || prev.symType === 'lab' || prev.segId !== undefined)) {
+                return `${prev.name}+1`;
+            }
+        }
+
+        // Fallback to whatever symbol we had (even if equate)
         return sym ? sym.name : undefined;
     }
 }

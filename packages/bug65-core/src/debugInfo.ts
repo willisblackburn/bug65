@@ -31,6 +31,7 @@ export interface SymbolInfo {
     type?: string;
     parentId?: number;
     symType?: string; // e.g. "func", "lab"
+    segId?: number;
 }
 
 export class DebugInfo {
@@ -44,11 +45,18 @@ export class DebugInfo {
 
     public addSymbol(sym: SymbolInfo) {
         if (sym.addr !== undefined) {
-            // Prefer exact matches. If multiple, maybe keep the one that is not 'export' or has a better name?
-            // For now just last one wins or first one?
-            // Often multiple labels for same address.
-            if (!this.addressToSymbol.has(sym.addr)) {
+            const existing = this.addressToSymbol.get(sym.addr);
+            if (!existing) {
                 this.addressToSymbol.set(sym.addr, sym);
+            } else {
+                // Heuristic: Prefer 'lab' over 'equ'
+                if (existing.type === 'equ' && sym.type === 'lab') {
+                    this.addressToSymbol.set(sym.addr, sym);
+                }
+                // Heuristic: Prefer symbol with segment ID (implies memory location)
+                else if (existing.segId === undefined && sym.segId !== undefined) {
+                    this.addressToSymbol.set(sym.addr, sym);
+                }
             }
         }
     }
@@ -145,7 +153,8 @@ export class DebugInfoParser {
 
                         const id = props.has('id') ? parseInt(props.get('id')!) : -1;
                         const type = props.get('type');
-                        const sym: SymbolInfo = { id, name, addr: val, type };
+                        const segId = props.has('seg') ? parseInt(props.get('seg')!) : undefined;
+                        const sym: SymbolInfo = { id, name, addr: val, type, segId };
                         if (id !== -1) info.symbols.set(id, sym);
                         info.symbolsByName.set(name, sym);
                         info.addSymbol(sym);
