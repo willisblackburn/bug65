@@ -14,6 +14,7 @@ export class Cpu6502 implements ICpu {
     protected cycles: number = 0;
 
     public onTrap: ((pc: number) => boolean) | undefined;
+    public breakpoints: Set<number> = new Set();
 
     constructor(memory: IMemory) {
         this.memory = memory;
@@ -41,6 +42,11 @@ export class Cpu6502 implements ICpu {
     }
 
     step(): number {
+        // Check breakpoint before trap
+        if (this.breakpoints.has(this.PC)) {
+            return 0;
+        }
+
         if (this.onTrap) {
             if (this.onTrap(this.PC)) {
                 return 0;
@@ -692,5 +698,17 @@ export class Cpu6502 implements ICpu {
 
     protected getFlag(flag: Flags): boolean {
         return (this.Status & flag) !== 0;
+    }
+
+    public addBreakpoint(addr: number): void {
+        this.breakpoints.add(addr);
+    }
+
+    public removeBreakpoint(addr: number): void {
+        this.breakpoints.delete(addr);
+    }
+
+    public clearBreakpoints(): void {
+        this.breakpoints.clear();
     }
 }

@@ -6,7 +6,7 @@ import {
     Thread, Scope, Source, Handles, Breakpoint
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { Cpu6502, Memory, CpuRegisters, Bug65Host } from 'bug65-core';
+import { Cpu6502, Memory, CpuRegisters, Bug65Host, DebugInfo, DebugInfoParser, Disassembler6502 } from 'bug65-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -21,6 +21,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
     private _cpu: Cpu6502;
     private _memory: Memory;
+    private _disassembler: Disassembler6502;
     private _variableHandles = new Handles<string>();
 
     constructor() {
@@ -28,6 +29,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
         this._memory = new Memory();
         this._cpu = new Cpu6502(this._memory);
+        this._disassembler = new Disassembler6502();
 
     }
 
@@ -54,6 +56,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
         const data = fs.readFileSync(programPath);
         const { loadAddr, resetAddr, spAddr } = this.loadProgram(data);
+        this.loadDebugInfo(programPath);
 
         this._cpu.reset();
 
@@ -110,6 +113,101 @@ export class Bug65DebugSession extends LoggingDebugSession {
         return { loadAddr, resetAddr, spAddr };
     }
 
+    protected setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): void {
+        const path = args.source.path as string;
+        const clientLines = args.lines || [];
+
+        // Clear existing breakpoints for this file (simplification)
+        // In reality, we should map all breakpoints again?
+        // Cpu breakpoints are by address.
+        // We need to manage address->breakpoint mapping.
+        // For now, let's just clear all and re-add? No, that clears other files.
+        // But since we only have single file programs mostly...
+        // Let's assume re-setting all is okay or unimplemented for multi-file properly yet.
+
+        // Actually, we must use DebugInfo to find addresses.
+        this._cpu.clearBreakpoints(); // TODO: Only clear for this file?
+
+        const actualBreakpoints = new Array<Breakpoint>();
+
+        if (this._debugInfo) {
+            const fileId = this.getFileId(path);
+            if (fileId !== -1) {
+                for (const l of clientLines) {
+                    // Find address for fileId/line
+                    // DebugInfo has addressToLine, but we need lineToAddress.
+                    // We can iterate lines.
+                    // Optimization: Build line->address map in DebugInfo or here.
+                    // For now, simple search.
+
+                    // Find all lines that match fileId and line
+                    // Note: multiple addresses might map to one line?
+                    // Or one line maps to a span (range).
+                    // We should set breakpoint at start of the span?
+
+                    const lineInfo = this._debugInfo.lines.find(li => li.fileId === fileId && li.line === l);
+
+                    if (lineInfo && lineInfo.spanId !== undefined) {
+                        const span = this._debugInfo.spans.get(lineInfo.spanId);
+                        if (span) {
+                            const addr = span.start;
+                            this._cpu.addBreakpoint(addr);
+                            actualBreakpoints.push(new Breakpoint(true, l, 0, new Source(path, path)));
+                            continue;
+                        }
+                    }
+                    actualBreakpoints.push(new Breakpoint(false, l, 0, new Source(path, path)));
+                }
+            }
+        } else {
+            // No debug info, cannot verify breakpoints?
+            // Or maybe user provided raw address? No, VS Code sends lines.
+            // Allow unverified breakpoints?
+            for (const l of clientLines) {
+                actualBreakpoints.push(new Breakpoint(false, l, 0, new Source(path, path)));
+            }
+        }
+
+        response.body = {
+            breakpoints: actualBreakpoints
+        };
+        this.sendResponse(response);
+    }
+
+    private _debugInfo: DebugInfo | undefined;
+
+    private loadDebugInfo(programPath: string) {
+        // Look for .dbg file
+        const ext = path.extname(programPath);
+        const dbgPath = programPath.slice(0, -ext.length) + '.dbg';
+        if (fs.existsSync(dbgPath)) {
+            try {
+                const content = fs.readFileSync(dbgPath, 'utf-8');
+                this._debugInfo = DebugInfoParser.parse(content);
+                this._disassembler = new Disassembler6502(this._debugInfo);
+                this.sendEvent(new OutputEvent(`[Bug65] Loaded debug info: ${dbgPath}\n`, 'console'));
+            } catch (e) {
+                this.sendEvent(new OutputEvent(`[Bug65] Failed to parse debug info: ${e}\n`, 'stderr'));
+            }
+        }
+    }
+
+    private getFileId(filePath: string): number {
+        if (!this._debugInfo) return -1;
+        // Map absolute path to debug info file entry
+        // Debug info usually has relative paths or basenames.
+        // We might need fuzzy matching.
+        const basename = path.basename(filePath);
+        for (const [id, file] of this._debugInfo.files) {
+            // Check if name matches basename (hacky but works for flat projects)
+            // Or check if filePath ends with file.name
+            if (file.name === basename || (file.name.includes(basename))) { // Very loose matching
+                return id;
+            }
+            if (filePath.endsWith(file.name)) return id;
+        }
+        return -1;
+    }
     protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
         response.body = {
             threads: [
@@ -120,17 +218,52 @@ export class Bug65DebugSession extends LoggingDebugSession {
     }
 
     protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): void {
+        const pc = this._cpu.getRegisters().PC;
+        let source: Source | undefined;
+        let line = 0;
+
+        if (this._debugInfo) {
+            const lineInfo = this._debugInfo.getLineForAddress(pc);
+            if (lineInfo) {
+                line = lineInfo.line;
+                const textFile = this._debugInfo.files.get(lineInfo.fileId);
+                if (textFile) {
+                    // Try to resolve absolute path
+                    // .dbg file usually has relative paths or just names.
+                    // We need to match it to workspace file.
+                    // If we loaded debug info from a file next to the program, we can use that directory?
+                    // Or if we know the workspace root.
+                    // Simple heuristic: if name is relative, join with program directory?
+                    // But 'name' might be just "hello.c".
+                    // The 'programPath' was passed in launchRequest. We could store it (root dir).
+                    // But we don't have it easily here unless we saved it.
+                    // Let's assume we can use the 'path' from the source file if it looks absolute, default to name.
+                    // But vscode expects absolute path for Source to work well.
+
+                    // Hack: assume source is next to .dbg file if relative.
+                    // We don't have dbg file path stored.
+                    // Let's rely on client lines providing matched paths? No, this is server sending stack.
+                    // We need to recreate the path we used in setBreakpointsRequest?
+                    // In setBreakpointsRequest we received 'path'.
+                    // Maybe we can cache fileId -> path mapping?
+
+                    // For now, send the name as path and name. VS Code might fuzzy match?
+                    // Better: DebugInfo filenames are usually relative to build dir.
+                    source = new Source(textFile.name, textFile.name);
+                }
+            }
+        }
+
+        const dasm = this._disassembler.disassemble(this._memory, pc);
+
         response.body = {
             stackFrames: [
                 {
                     id: 0,
-                    name: `PC: $${this._cpu.getRegisters().PC.toString(16).toUpperCase()}`,
-                    line: 0,
+                    name: `PC: $${pc.toString(16).toUpperCase()}  ${dasm.asm}`,
+                    line: line,
                     column: 0,
-                    source: {
-                        name: "Memory",
-                        path: "memory"
-                    }
+                    source: source
                 }
             ],
             totalFrames: 1
@@ -219,17 +352,16 @@ export class Bug65DebugSession extends LoggingDebugSession {
         let running = true;
         for (let i = 0; i < batch; i++) {
             const cycles = this._cpu.step();
-            // Bug65Host handles traps internally and triggers events
-            // We just need to ensure we don't spin forever on terminated session
-            // But we don't have a 'running' flag easily accessible here unless we track it
             if (cycles === 0) {
-                // Should be handled by host?
-                // But step() returns 0 if trap says 'stop'?
-                // Verify.
-                // Actually host hook returns true to stop.
-                // cpu.step() returns 0.
+                // Stopped
                 running = false;
-                // Terminated event likely sent by host.onExit
+
+                // Was it a breakpoint?
+                if (this._cpu.breakpoints.has(this._cpu.getRegisters().PC)) {
+                    this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
+                } else {
+                    this.sendEvent(new StoppedEvent('pause', Bug65DebugSession.THREAD_ID));
+                }
                 break;
             }
         }

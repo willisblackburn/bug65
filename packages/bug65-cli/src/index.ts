@@ -1,5 +1,5 @@
 
-import { Cpu6502, Memory, Flags, Bug65Host } from 'bug65-core';
+import { Cpu6502, Memory, Flags, Bug65Host, Disassembler6502, DebugInfo, DebugInfoParser } from 'bug65-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -16,9 +16,19 @@ function main() {
     let specifiedLoadAddr: number | null = null;
 
     // Parse args
+    let dbgFileArg: string | null = null;
+
+    // Parse args
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--trace' || args[i] === '-t') {
             trace = true;
+        } else if (args[i] === '--dbgfile') {
+            if (i + 1 < args.length) {
+                dbgFileArg = args[++i];
+            } else {
+                console.error("Error: --dbgfile requires an argument");
+                process.exit(1);
+            }
         } else if (!programPath) {
             programPath = args[i];
         } else if (specifiedLoadAddr === null) {
@@ -121,11 +131,64 @@ function main() {
 
         // Run loop
 
+        // Try loading debug info
+        let debugInfo: DebugInfo | undefined;
+        let dbgPath: string | null = null;
+
+        // Check for .dbg file (replace extension or append)
+        if (dbgFileArg) {
+            if (fs.existsSync(dbgFileArg)) {
+                dbgPath = dbgFileArg;
+            } else {
+                console.error(`Warning: Specified debug file not found: ${dbgFileArg}`);
+            }
+        } else {
+            const ext = path.extname(programPath);
+            const candidates = [
+                programPath.slice(0, -ext.length) + '.dbg',
+                programPath + '.dbg'
+            ];
+
+            for (const c of candidates) {
+                if (fs.existsSync(c)) {
+                    dbgPath = c;
+                    break;
+                }
+            }
+        }
+
+
+
+        if (dbgPath) {
+            console.error(`Loading debug info from: ${dbgPath}`);
+            const dbgContent = fs.readFileSync(dbgPath, 'utf-8');
+            debugInfo = DebugInfoParser.parse(dbgContent);
+            console.error(`  Loaded ${debugInfo.symbols.size} symbols, ${debugInfo.lines.length} lines.`);
+        } else {
+            console.error("No debug info file found.");
+        }
+
+        const disassembler = new Disassembler6502(debugInfo);
+
+        // Run loop
+
         while (true) {
             if (trace && cpu) {
                 const regs = cpu.getRegisters();
-                const opcode = memory.read(regs.PC);
-                console.error(`${regs.PC.toString(16).toUpperCase().padStart(4, '0')}  ${opcode.toString(16).toUpperCase().padStart(2, '0')}  A:${regs.A.toString(16).toUpperCase().padStart(2, '0')} X:${regs.X.toString(16).toUpperCase().padStart(2, '0')} Y:${regs.Y.toString(16).toUpperCase().padStart(2, '0')} P:${regs.Status.toString(16).toUpperCase().padStart(2, '0')} SP:${regs.SP.toString(16).toUpperCase().padStart(2, '0')}`);
+                const { asm, bytes } = disassembler.disassemble(memory, regs.PC);
+
+                let symbolStr = '            '; // 12 spaces
+                if (debugInfo) {
+                    const sym = debugInfo.getSymbolForAddress(regs.PC);
+                    if (sym) {
+                        // Truncate if too long?
+                        symbolStr = `  ${sym.name}`.padEnd(12).slice(0, 12);
+                    }
+                }
+
+                const bytesStr = bytes.map((b: number) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ').padEnd(9);
+
+                console.error(`${regs.PC.toString(16).toUpperCase().padStart(4, '0')}${symbolStr}  ${bytesStr} ${asm}   A:${regs.A.toString(16).toUpperCase().padStart(2, '0')} X:${regs.X.toString(16).toUpperCase().padStart(2, '0')} Y:${regs.Y.toString(16).toUpperCase().padStart(2, '0')} P:${regs.Status.toString(16).toUpperCase().padStart(2, '0')} SP:${regs.SP.toString(16).toUpperCase().padStart(2, '0')}`);
             }
             // Check for FFF7 manually here or add to host
             cpu.step();

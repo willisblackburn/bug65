@@ -39,8 +39,23 @@ export class DebugInfo {
     public spans: Map<number, SpanInfo> = new Map();
     public symbols: Map<number, SymbolInfo> = new Map();
     public symbolsByName: Map<string, SymbolInfo> = new Map();
-
     private addressToLine: Map<number, LineInfo> = new Map();
+    private addressToSymbol: Map<number, SymbolInfo> = new Map();
+
+    public addSymbol(sym: SymbolInfo) {
+        if (sym.addr !== undefined) {
+            // Prefer exact matches. If multiple, maybe keep the one that is not 'export' or has a better name?
+            // For now just last one wins or first one?
+            // Often multiple labels for same address.
+            if (!this.addressToSymbol.has(sym.addr)) {
+                this.addressToSymbol.set(sym.addr, sym);
+            }
+        }
+    }
+
+    public getSymbolForAddress(addr: number): SymbolInfo | undefined {
+        return this.addressToSymbol.get(addr);
+    }
 
     // Mapping from address to nearest line info
     // Since lines map to spans (ranges), we can lookup address in spans.
@@ -85,21 +100,17 @@ export class DebugInfoParser {
         const info = new DebugInfo();
         const lines = content.split(/\r?\n/);
 
-        // Map line definitions to process after spans are loaded
-        const pendingLines: { id: number, file: number, line: number, type?: number, spans?: number[] }[] = [];
-
-        // cc65 dbg lines look like: "type key=val,key=val..."
+        // Store items to process after first pass
+        const rawLines: { fileId: number, lineNum: number, spanId?: number }[] = [];
 
         for (const lineStr of lines) {
             if (!lineStr.trim()) continue;
 
-            // Split type and keypairs
-            const firstSpace = lineStr.indexOf(' ');
-            if (firstSpace === -1) continue;
+            const match = lineStr.match(/^(\S+)\s+(.*)$/);
+            if (!match) continue;
 
-            const type = lineStr.substring(0, firstSpace);
-            const remainder = lineStr.substring(firstSpace + 1);
-
+            const type = match[1];
+            const remainder = match[2];
             const props = this.parseProps(remainder);
 
             switch (type) {
@@ -108,7 +119,7 @@ export class DebugInfoParser {
                         const id = parseInt(props.get('id')!);
                         info.files.set(id, {
                             id,
-                            name: props.get('name')!.replace(/"/g, ''), // strip quotes
+                            name: props.get('name')!.replace(/"/g, ''),
                             size: props.has('size') ? parseInt(props.get('size')!) : undefined
                         });
                     }
@@ -125,40 +136,45 @@ export class DebugInfoParser {
                     }
                     break;
                 case 'sym':
-                    if (props.has('name') && props.has('val')) { // simple label
-                        // or 'addr' in dbg?
+                    if (props.has('name')) {
                         const name = props.get('name')!.replace(/"/g, '');
-                        const val = this.parseNumber(props.get('val')!);
-                        // Add to symbols?
-                        // Full dbg sym format: sym id=...,name=...,addr=...,size=...
-                        const addr = props.has('addr') ? this.parseNumber(props.get('addr')!) : val;
-                        const id = props.has('id') ? parseInt(props.get('id')!) : -1;
+                        // val is decimal or hex
+                        let val = 0;
+                        if (props.has('val')) val = this.parseNumber(props.get('val')!);
+                        else if (props.has('addr')) val = this.parseNumber(props.get('addr')!);
 
-                        const sym: SymbolInfo = { id, name, addr };
+                        const id = props.has('id') ? parseInt(props.get('id')!) : -1;
+                        const type = props.get('type');
+                        const sym: SymbolInfo = { id, name, addr: val, type };
                         if (id !== -1) info.symbols.set(id, sym);
                         info.symbolsByName.set(name, sym);
+                        info.addSymbol(sym);
                     }
                     break;
                 case 'line':
-                    // format: line id=..,file=..,line=..,type=..,span=.. (repeating spans?)
-                    // or: line id=0,file=0,line=10,span=5
                     if (props.has('file') && props.has('line')) {
                         const fileId = parseInt(props.get('file')!);
                         const lineNum = parseInt(props.get('line')!);
                         const spanIdStr = props.get('span');
-
-                        // Wait, 'line' usually lists spans associated with it.
-                        // Or 'span' lists lines?
-                        // Let's assume simple 1:1 for now if 'span' attribute exists.
-
+                        let spanId: number | undefined;
                         if (spanIdStr) {
-                            const spanId = parseInt(spanIdStr);
-                            const lInfo: LineInfo = { fileId, line: lineNum, spanId };
-                            info.lines.push(lInfo);
-                            info.addLineMapping(spanId, lInfo);
+                            const plusIdx = spanIdStr.indexOf('+');
+                            if (plusIdx !== -1) spanId = parseInt(spanIdStr.substring(0, plusIdx));
+                            else spanId = parseInt(spanIdStr);
                         }
+
+                        rawLines.push({ fileId, lineNum, spanId });
                     }
                     break;
+            }
+        }
+
+        // Second pass: Process lines now that spans are loaded
+        for (const l of rawLines) {
+            const lInfo: LineInfo = { fileId: l.fileId, line: l.lineNum, spanId: l.spanId };
+            info.lines.push(lInfo);
+            if (l.spanId !== undefined) {
+                info.addLineMapping(l.spanId, lInfo);
             }
         }
 
@@ -171,9 +187,6 @@ export class DebugInfoParser {
         let inValue = false;
         let valStart = 0;
         let inQuote = false;
-
-        // "key=val,key=val"
-        // Need to handle commas inside quotes
 
         for (let i = 0; i <= str.length; i++) {
             const char = str[i];
