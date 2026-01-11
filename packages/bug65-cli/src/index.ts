@@ -11,7 +11,7 @@ function printHelp() {
 function main() {
     const args = process.argv.slice(2);
 
-    let trace = false;
+    let traceMode: 'off' | 'source' | 'disassemble' = 'off';
     let programPath: string | null = null;
     let specifiedLoadAddr: number | null = null;
 
@@ -21,7 +21,15 @@ function main() {
     // Parse args
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--trace' || args[i] === '-t') {
-            trace = true;
+            traceMode = 'source';
+        } else if (args[i].startsWith('--trace=')) {
+            const mode = args[i].split('=')[1];
+            if (mode === 'source' || mode === 'disassemble') {
+                traceMode = mode;
+            } else {
+                console.error(`Invalid trace mode: ${mode}`);
+                process.exit(1);
+            }
         } else if (args[i] === '--dbgfile') {
             if (i + 1 < args.length) {
                 dbgFileArg = args[++i];
@@ -170,25 +178,71 @@ function main() {
 
         const disassembler = new Disassembler6502(debugInfo);
 
+        // Source cache
+        const sourceCache = new Map<number, string[]>();
+        let lastSourceLine: string | null = null;
+        let lastSourceFileId: number = -1;
+        let lastSourceLineNum: number = -1;
+
+        function getSourceLine(fileId: number, lineNum: number): string | undefined {
+            let lines = sourceCache.get(fileId);
+            if (!lines) {
+                if (debugInfo && debugInfo.files.has(fileId)) {
+                    const fileEntry = debugInfo.files.get(fileId);
+                    if (fileEntry) {
+                        // Try to resolve path. debugInfo often has relative paths.
+                        // Try relative to dbg file location, then program location.
+                        // Or maybe it is relative to cwd?
+                        let srcPath = fileEntry.name;
+                        if (!path.isAbsolute(srcPath) && dbgPath) {
+                            srcPath = path.resolve(path.dirname(dbgPath), srcPath);
+                        }
+
+                        if (fs.existsSync(srcPath)) {
+                            try {
+                                const content = fs.readFileSync(srcPath, 'utf-8');
+                                lines = content.split(/\r?\n/);
+                                sourceCache.set(fileId, lines);
+                            } catch (e) {
+                                // Ignore read errors
+                            }
+                        }
+                    }
+                }
+            }
+
+
+            if (lines && lineNum > 0 && lineNum <= lines.length) {
+                return lines[lineNum - 1]; // Line numbers are 1-based
+            }
+            return undefined;
+        }
+
         // Run loop
 
         while (true) {
-            if (trace && cpu) {
+            if (traceMode !== 'off' && cpu) {
                 const regs = cpu.getRegisters();
-                const { asm, bytes } = disassembler.disassemble(memory, regs.PC);
 
-                let symbolStr = '            '; // 12 spaces
-                if (debugInfo) {
-                    const sym = debugInfo.getSymbolForAddress(regs.PC);
-                    if (sym) {
-                        // Truncate if too long?
-                        symbolStr = `  ${sym.name}`.padEnd(12).slice(0, 12);
+                if (traceMode === 'source') {
+                    if (debugInfo) {
+                        const lineInfo = debugInfo.getLineForAddress(regs.PC);
+                        if (lineInfo) {
+                            if (lineInfo.fileId !== lastSourceFileId || lineInfo.line !== lastSourceLineNum) {
+                                const srcLine = getSourceLine(lineInfo.fileId, lineInfo.line);
+                                if (srcLine) {
+                                    // Clean up the line for printing
+                                    console.error(`${srcLine.trim()}`);
+                                    lastSourceFileId = lineInfo.fileId;
+                                    lastSourceLineNum = lineInfo.line;
+                                }
+                            }
+                        }
                     }
+                } else {
+                    // Disassemble mode
+                    printDisassembly(cpu, memory, disassembler, debugInfo);
                 }
-
-                const bytesStr = bytes.map((b: number) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ').padEnd(9);
-
-                console.error(`${regs.PC.toString(16).toUpperCase().padStart(4, '0')}${symbolStr}  ${bytesStr} ${asm}   A:${regs.A.toString(16).toUpperCase().padStart(2, '0')} X:${regs.X.toString(16).toUpperCase().padStart(2, '0')} Y:${regs.Y.toString(16).toUpperCase().padStart(2, '0')} P:${regs.Status.toString(16).toUpperCase().padStart(2, '0')} SP:${regs.SP.toString(16).toUpperCase().padStart(2, '0')}`);
             }
             // Check for FFF7 manually here or add to host
             cpu.step();
@@ -217,6 +271,23 @@ function main() {
 
         process.exit(1);
     }
+}
+
+function printDisassembly(cpu: Cpu6502, memory: Memory, disassembler: Disassembler6502, debugInfo: DebugInfo | undefined) {
+    const regs = cpu.getRegisters();
+    const { asm, bytes } = disassembler.disassemble(memory, regs.PC);
+
+    let symbolStr = '            '; // 12 spaces
+    if (debugInfo) {
+        const sym = debugInfo.getSymbolForAddress(regs.PC);
+        if (sym) {
+            symbolStr = `  ${sym.name}`.padEnd(12).slice(0, 12);
+        }
+    }
+
+    const bytesStr = bytes.map((b: number) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ').padEnd(9);
+
+    console.error(`${regs.PC.toString(16).toUpperCase().padStart(4, '0')}${symbolStr}  ${bytesStr} ${asm}   A:${regs.A.toString(16).toUpperCase().padStart(2, '0')} X:${regs.X.toString(16).toUpperCase().padStart(2, '0')} Y:${regs.Y.toString(16).toUpperCase().padStart(2, '0')} P:${regs.Status.toString(16).toUpperCase().padStart(2, '0')} SP:${regs.SP.toString(16).toUpperCase().padStart(2, '0')}`);
 }
 
 main();

@@ -13,6 +13,7 @@ export interface LineInfo {
     fileId: number;
     line: number;
     spanId?: number; // referenced span?
+    type?: number;
 }
 
 export interface SpanInfo {
@@ -34,8 +35,16 @@ export interface SymbolInfo {
     segId?: number;
 }
 
+export interface SegmentInfo {
+    id: number;
+    name: string;
+    start: number;
+    size: number;
+}
+
 export class DebugInfo {
     public files: Map<number, SourceFile> = new Map();
+    public segments: Map<number, SegmentInfo> = new Map();
     public lines: LineInfo[] = []; // List of all line mappings
     public spans: Map<number, SpanInfo> = new Map();
     public symbols: Map<number, SymbolInfo> = new Map();
@@ -96,8 +105,22 @@ export class DebugInfo {
     public addLineMapping(spanId: number, lineInfo: LineInfo) {
         const span = this.spans.get(spanId);
         if (span) {
+            const segStart = this.segments.get(span.segId)?.start || 0;
             for (let i = 0; i < span.size; i++) {
-                this.addressToLine.set(span.start + i, lineInfo);
+                const addr = segStart + span.start + i;
+                const existing = this.addressToLine.get(addr);
+
+                // Heuristic: Prefer type=1 (C/High-level) over undefined (ASM)
+                if (!existing || (existing.type !== 1 && lineInfo.type === 1)) {
+                    this.addressToLine.set(addr, lineInfo);
+                } else if (!existing && lineInfo.type !== 1) {
+                    this.addressToLine.set(addr, lineInfo);
+                }
+                // If existing is 1 and new is not 1, keep existing.
+                // If both are same type, overwrite? (Standard behavior)
+                else if (existing && existing.type === lineInfo.type) {
+                    this.addressToLine.set(addr, lineInfo);
+                }
             }
         }
     }
@@ -109,7 +132,7 @@ export class DebugInfoParser {
         const lines = content.split(/\r?\n/);
 
         // Store items to process after first pass
-        const rawLines: { fileId: number, lineNum: number, spanId?: number }[] = [];
+        const rawLines: { fileId: number, lineNum: number, spanId?: number, type?: number }[] = [];
 
         for (const lineStr of lines) {
             if (!lineStr.trim()) continue;
@@ -129,6 +152,17 @@ export class DebugInfoParser {
                             id,
                             name: props.get('name')!.replace(/"/g, ''),
                             size: props.has('size') ? parseInt(props.get('size')!) : undefined
+                        });
+                    }
+                    break;
+                case 'seg':
+                    if (props.has('id') && props.has('start')) {
+                        const id = parseInt(props.get('id')!);
+                        info.segments.set(id, {
+                            id,
+                            name: props.get('name')!.replace(/"/g, ''),
+                            start: this.parseNumber(props.get('start')!),
+                            size: this.parseNumber(props.get('size')!)
                         });
                     }
                     break;
@@ -164,6 +198,7 @@ export class DebugInfoParser {
                     if (props.has('file') && props.has('line')) {
                         const fileId = parseInt(props.get('file')!);
                         const lineNum = parseInt(props.get('line')!);
+                        const type = props.has('type') ? parseInt(props.get('type')!) : undefined;
                         const spanIdStr = props.get('span');
                         let spanId: number | undefined;
                         if (spanIdStr) {
@@ -172,7 +207,7 @@ export class DebugInfoParser {
                             else spanId = parseInt(spanIdStr);
                         }
 
-                        rawLines.push({ fileId, lineNum, spanId });
+                        rawLines.push({ fileId, lineNum, spanId, type });
                     }
                     break;
             }
@@ -180,7 +215,7 @@ export class DebugInfoParser {
 
         // Second pass: Process lines now that spans are loaded
         for (const l of rawLines) {
-            const lInfo: LineInfo = { fileId: l.fileId, line: l.lineNum, spanId: l.spanId };
+            const lInfo: LineInfo = { fileId: l.fileId, line: l.lineNum, spanId: l.spanId, type: l.type };
             info.lines.push(lInfo);
             if (l.spanId !== undefined) {
                 info.addLineMapping(l.spanId, lInfo);
