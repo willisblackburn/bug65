@@ -1,5 +1,5 @@
 {
-  "name": "sim65-vscode-monorepo",
+  "name": "bug65-vscode-monorepo",
   "version": "0.1.0",
   "private": true,
   "workspaces": [
