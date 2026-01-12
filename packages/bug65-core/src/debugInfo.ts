@@ -188,7 +188,8 @@ export class DebugInfoParser {
                         const id = props.has('id') ? parseInt(props.get('id')!) : -1;
                         const type = props.get('type');
                         const segId = props.has('seg') ? parseInt(props.get('seg')!) : undefined;
-                        const sym: SymbolInfo = { id, name, addr: val, type, segId };
+                        const size = props.has('size') ? this.parseNumber(props.get('size')!) : undefined;
+                        const sym: SymbolInfo = { id, name, addr: val, type, segId, size };
                         if (id !== -1) info.symbols.set(id, sym);
                         info.symbolsByName.set(name, sym);
                         info.addSymbol(sym);

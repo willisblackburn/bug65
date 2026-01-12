@@ -468,6 +468,43 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this.sendResponse(response);
     }
 
+    protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
+        const expression = args.expression;
+
+        // Simple variable lookup by name
+        if (this._debugInfo) {
+            const sym = this._debugInfo.symbolsByName.get(expression);
+            if (sym && sym.addr !== undefined) {
+                // Determine size
+                // If size is present, use it. Default to 1 byte.
+                // If size is 2, read word.
+                const size = sym.size || 1;
+                let val = 0;
+                let valStr = "";
+
+                if (size === 2) {
+                    val = this._memory.readWord(sym.addr);
+                    valStr = `$${val.toString(16).toUpperCase().padStart(4, '0')} (${val})`;
+                } else {
+                    val = this._memory.read(sym.addr);
+                    valStr = `$${val.toString(16).toUpperCase().padStart(2, '0')} (${val})`;
+                }
+
+                response.body = {
+                    result: valStr,
+                    variablesReference: 0
+                };
+                this.sendResponse(response);
+                return;
+            }
+        }
+
+        // If not found or no debug info
+        // We do not fail the request necessarily, but we can return null result
+        // But throwing error is standard if not evaluatable
+        this.sendErrorResponse(response, 0, `Variable ${expression} not found.`);
+    }
+
     private setupStep(mode: 'line' | 'over') {
         const pc = this._cpu.getRegisters().PC;
         this._stepMode = mode;
