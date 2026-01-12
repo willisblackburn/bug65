@@ -23,6 +23,12 @@ export class Bug65DebugSession extends LoggingDebugSession {
     private _memory: Memory;
     private _disassembler: Disassembler6502;
     private _variableHandles = new Handles<string>();
+    private _stopOnEntry = false;
+
+    private _stepMode: 'instruction' | 'line' | 'over' = 'instruction';
+    private _stepStartLine: number = 0;
+    private _stepStartFile: number = 0;
+    private _tempBreakpoint: number | undefined;
 
     constructor() {
         super("bug65-debug.txt");
@@ -44,11 +50,14 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this.sendEvent(new InitializedEvent());
     }
 
+    private _programDir: string = "";
+
     protected async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments) {
         logger.setup(Logger.LogLevel.Verbose, false);
         this.sendEvent(new OutputEvent(`[Bug65] Launching program: ${args.program}\n`, 'console'));
 
         const programPath = args.program;
+        this._programDir = path.dirname(programPath);
         if (!fs.existsSync(programPath)) {
             this.sendErrorResponse(response, 0, `Program file ${programPath} not found.`);
             return;
@@ -82,10 +91,18 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this.sendResponse(response);
         this.sendEvent(new OutputEvent(`[Bug65] System initialized. PC=$${this._cpu.getRegisters().PC.toString(16)}\n`, 'console'));
 
+        this._stopOnEntry = !!args.stopOnEntry;
         if (args.stopOnEntry) {
             this.sendEvent(new StoppedEvent('entry', Bug65DebugSession.THREAD_ID));
         } else {
-            this.continueRequest(<DebugProtocol.ContinueResponse>response, { threadId: Bug65DebugSession.THREAD_ID });
+            // Defer until configurationDone
+        }
+    }
+
+    protected configurationDoneRequest(response: DebugProtocol.ConfigurationDoneResponse, args: DebugProtocol.ConfigurationDoneArguments): void {
+        super.configurationDoneRequest(response, args);
+        if (!this._stopOnEntry) {
+            this.runLoop();
         }
     }
 
@@ -252,7 +269,11 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
                     // For now, send the name as path and name. VS Code might fuzzy match?
                     // Better: DebugInfo filenames are usually relative to build dir.
-                    source = new Source(textFile.name, textFile.name);
+                    let sourcePath = textFile.name;
+                    if (!path.isAbsolute(sourcePath) && this._programDir) {
+                        sourcePath = path.join(this._programDir, sourcePath);
+                    }
+                    source = new Source(path.basename(sourcePath), sourcePath);
                 }
             }
         }
@@ -353,19 +374,80 @@ export class Bug65DebugSession extends LoggingDebugSession {
     private runLoop() {
         const batch = 1000;
         let running = true;
-        for (let i = 0; i < batch; i++) {
-            const cycles = this._cpu.step();
-            if (cycles === 0) {
-                // Stopped
-                running = false;
 
-                // Was it a breakpoint?
-                if (this._cpu.breakpoints.has(this._cpu.getRegisters().PC)) {
-                    this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
-                } else {
-                    this.sendEvent(new StoppedEvent('pause', Bug65DebugSession.THREAD_ID));
+        // If we are currently at a breakpoint, step over it first (ignoring the breakpoint)
+        if (this._cpu.breakpoints.has(this._cpu.getRegisters().PC)) {
+            // Check if it is a JSR before we step!
+            if (this._stepMode === 'over' && this._tempBreakpoint === undefined) {
+                const pc = this._cpu.getRegisters().PC;
+                const opcode = this._memory.read(pc);
+                if (opcode === 0x20) { // JSR
+                    this._tempBreakpoint = pc + 3;
                 }
+            }
+
+            const cycles = this._cpu.step(true);
+            if (cycles === 0) {
+                this.sendEvent(new StoppedEvent('pause', Bug65DebugSession.THREAD_ID));
+                return;
+            }
+        }
+
+        for (let i = 0; i < batch; i++) {
+            const pc = this._cpu.getRegisters().PC;
+
+            // Check temp breakpoint
+            if (this._tempBreakpoint !== undefined && pc === this._tempBreakpoint) {
+                // Hit our step-over return point.
+                this._tempBreakpoint = undefined;
+            }
+
+            // Execute one instruction
+            // If stepping over, and JSR, and not already waiting for return:
+            if (this._stepMode === 'over' && this._tempBreakpoint === undefined) {
+                const opcode = this._memory.read(pc);
+                if (opcode === 0x20) { // JSR
+                    this._tempBreakpoint = pc + 3;
+                }
+            }
+
+            // If we have a temp breakpoint set, we are running freely until we hit it or another BP.
+            if (this._tempBreakpoint !== undefined && pc !== this._tempBreakpoint) {
+                if (this._cpu.breakpoints.has(pc)) {
+                    this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
+                    running = false;
+                    break;
+                }
+                this._cpu.step(true);
+                continue;
+            }
+
+            // Standard step
+            const cycles = this._cpu.step(true);
+            if (cycles === 0) {
+                running = false;
+                this.sendEvent(new StoppedEvent('pause', Bug65DebugSession.THREAD_ID));
                 break;
+            }
+
+            if (this._cpu.breakpoints.has(this._cpu.getRegisters().PC)) {
+                this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
+                running = false;
+                break;
+            }
+
+            // Check Step Logic
+            if (this._stepMode === 'line' || this._stepMode === 'over') {
+                if (this._debugInfo) {
+                    const lineInfo = this._debugInfo.getLineForAddress(this._cpu.getRegisters().PC);
+                    if (lineInfo) {
+                        if (lineInfo.fileId !== this._stepStartFile || lineInfo.line !== this._stepStartLine) {
+                            this.sendEvent(new StoppedEvent('step', Bug65DebugSession.THREAD_ID));
+                            running = false;
+                            break;
+                        }
+                    }
+                }
             }
         }
 
@@ -375,14 +457,30 @@ export class Bug65DebugSession extends LoggingDebugSession {
     }
 
     protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): void {
-        this._cpu.step();
+        this.setupStep('over');
+        this.runLoop();
         this.sendResponse(response);
-        this.sendEvent(new StoppedEvent('step', Bug65DebugSession.THREAD_ID));
     }
 
     protected stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments): void {
-        this._cpu.step();
+        this.setupStep('line');
+        this.runLoop();
         this.sendResponse(response);
-        this.sendEvent(new StoppedEvent('step', Bug65DebugSession.THREAD_ID));
+    }
+
+    private setupStep(mode: 'line' | 'over') {
+        const pc = this._cpu.getRegisters().PC;
+        this._stepMode = mode;
+        this._stepStartFile = -1;
+        this._stepStartLine = -1;
+        this._tempBreakpoint = undefined;
+
+        if (this._debugInfo) {
+            const lineInfo = this._debugInfo.getLineForAddress(pc);
+            if (lineInfo) {
+                this._stepStartFile = lineInfo.fileId;
+                this._stepStartLine = lineInfo.line;
+            }
+        }
     }
 }

@@ -41,9 +41,9 @@ export class Cpu6502 implements ICpu {
         };
     }
 
-    step(): number {
+    step(ignoreBreakpoint: boolean = false): number {
         // Check breakpoint before trap
-        if (this.breakpoints.has(this.PC)) {
+        if (!ignoreBreakpoint && this.breakpoints.has(this.PC)) {
             return 0;
         }
 
