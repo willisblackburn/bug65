@@ -58,6 +58,23 @@
                     }
                 ]
             }
+        ],
+        "breakpoints": [
+            {
+                "language": "c"
+            },
+            {
+                "language": "cpp"
+            },
+            {
+                "language": "assembly"
+            },
+            {
+                "language": "asm"
+            },
+            {
+                "language": "ca65"
+            }
         ]
     },
     "scripts": {
