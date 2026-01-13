@@ -51,6 +51,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
     }
 
     private _programDir: string = "";
+    private _cwd: string = "";
 
     protected async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments) {
         logger.setup(Logger.LogLevel.Verbose, false);
@@ -58,6 +59,15 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
         const programPath = args.program;
         this._programDir = path.dirname(programPath);
+
+        // Use args.cwd from configurationAttributes (needs update in LaunchRequestArguments interface)
+        // Note: args is LaunchRequestArguments which extends Map<string, any>.
+        // We can access properties not in the interface if we cast or access by string.
+        const cwd = (args as any).cwd || this._programDir;
+        this._cwd = cwd;
+
+        this.sendEvent(new OutputEvent(`[Bug65] CWD: ${this._cwd}\n`, 'console'));
+
         if (!fs.existsSync(programPath)) {
             this.sendErrorResponse(response, 0, `Program file ${programPath} not found.`);
             return;
@@ -135,14 +145,6 @@ export class Bug65DebugSession extends LoggingDebugSession {
         const clientLines = args.lines || [];
 
         // Clear existing breakpoints for this file (simplification)
-        // In reality, we should map all breakpoints again?
-        // Cpu breakpoints are by address.
-        // We need to manage address->breakpoint mapping.
-        // For now, let's just clear all and re-add? No, that clears other files.
-        // But since we only have single file programs mostly...
-        // Let's assume re-setting all is okay or unimplemented for multi-file properly yet.
-
-        // Actually, we must use DebugInfo to find addresses.
         this._cpu.clearBreakpoints(); // TODO: Only clear for this file?
 
         const actualBreakpoints = new Array<Breakpoint>();
@@ -151,17 +153,6 @@ export class Bug65DebugSession extends LoggingDebugSession {
             const fileId = this.getFileId(path);
             if (fileId !== -1) {
                 for (const l of clientLines) {
-                    // Find address for fileId/line
-                    // DebugInfo has addressToLine, but we need lineToAddress.
-                    // We can iterate lines.
-                    // Optimization: Build line->address map in DebugInfo or here.
-                    // For now, simple search.
-
-                    // Find all lines that match fileId and line
-                    // Note: multiple addresses might map to one line?
-                    // Or one line maps to a span (range).
-                    // We should set breakpoint at start of the span?
-
                     const lineInfo = this._debugInfo.lines.find(li => li.fileId === fileId && li.line === l);
 
                     if (lineInfo && lineInfo.spanId !== undefined) {
@@ -180,9 +171,6 @@ export class Bug65DebugSession extends LoggingDebugSession {
                 }
             }
         } else {
-            // No debug info, cannot verify breakpoints?
-            // Or maybe user provided raw address? No, VS Code sends lines.
-            // Allow unverified breakpoints?
             for (const l of clientLines) {
                 actualBreakpoints.push(new Breakpoint(false, l, 0, new Source(path, path)));
             }
@@ -247,32 +235,30 @@ export class Bug65DebugSession extends LoggingDebugSession {
             if (lineInfo) {
                 line = lineInfo.line;
                 const textFile = this._debugInfo.files.get(lineInfo.fileId);
-                if (textFile) {
+
+                // Check if this file is a library file
+                const isLib = this._debugInfo.fileIsLibrary.get(lineInfo.fileId);
+
+                if (textFile && !isLib) {
                     // Try to resolve absolute path
-                    // .dbg file usually has relative paths or just names.
-                    // We need to match it to workspace file.
-                    // If we loaded debug info from a file next to the program, we can use that directory?
-                    // Or if we know the workspace root.
-                    // Simple heuristic: if name is relative, join with program directory?
-                    // But 'name' might be just "hello.c".
-                    // The 'programPath' was passed in launchRequest. We could store it (root dir).
-                    // But we don't have it easily here unless we saved it.
-                    // Let's assume we can use the 'path' from the source file if it looks absolute, default to name.
-                    // But vscode expects absolute path for Source to work well.
-
-                    // Hack: assume source is next to .dbg file if relative.
-                    // We don't have dbg file path stored.
-                    // Let's rely on client lines providing matched paths? No, this is server sending stack.
-                    // We need to recreate the path we used in setBreakpointsRequest?
-                    // In setBreakpointsRequest we received 'path'.
-                    // Maybe we can cache fileId -> path mapping?
-
-                    // For now, send the name as path and name. VS Code might fuzzy match?
-                    // Better: DebugInfo filenames are usually relative to build dir.
                     let sourcePath = textFile.name;
-                    if (!path.isAbsolute(sourcePath) && this._programDir) {
-                        sourcePath = path.join(this._programDir, sourcePath);
+
+                    // Use CWD for relative paths
+                    if (!path.isAbsolute(sourcePath)) {
+                        // 1. Try resolving against CWD (default)
+                        let candidate = path.join(this._cwd, sourcePath);
+
+                        // 2. Fallback: If not found, try resolving relative to parent of CWD.
+                        if (!fs.existsSync(candidate)) {
+                            const parentCwd = path.dirname(this._cwd);
+                            const candidate2 = path.join(parentCwd, sourcePath);
+                            if (fs.existsSync(candidate2)) {
+                                candidate = candidate2;
+                            }
+                        }
+                        sourcePath = candidate;
                     }
+
                     source = new Source(path.basename(sourcePath), sourcePath);
                 }
             }

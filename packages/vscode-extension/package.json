@@ -40,6 +40,11 @@
                                 "type": "string",
                                 "description": "Absolute path to a bug65 program.",
                                 "default": "${workspaceFolder}/program.bin"
+                            },
+                            "cwd": {
+                                "type": "string",
+                                "description": "Working directory for the program.",
+                                "default": "${workspaceFolder}"
                             }
                         }
                     }

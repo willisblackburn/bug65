@@ -42,6 +42,19 @@ export interface SegmentInfo {
     size: number;
 }
 
+export interface ModuleInfo {
+    id: number;
+    name: string;
+    fileId: number; // Primary source file
+    libId?: number; // References a library?
+    lib?: boolean; // Is library?
+}
+
+export interface LibraryInfo {
+    id: number;
+    name: string;
+}
+
 export class DebugInfo {
     public files: Map<number, SourceFile> = new Map();
     public segments: Map<number, SegmentInfo> = new Map();
@@ -49,6 +62,12 @@ export class DebugInfo {
     public spans: Map<number, SpanInfo> = new Map();
     public symbols: Map<number, SymbolInfo> = new Map();
     public symbolsByName: Map<string, SymbolInfo> = new Map();
+    public modules: Map<number, ModuleInfo> = new Map();
+    public libraries: Map<number, LibraryInfo> = new Map();
+
+    // Derived map: fileId -> isLibrary
+    public fileIsLibrary: Map<number, boolean> = new Map();
+
     private addressToLine: Map<number, LineInfo> = new Map();
     private addressToSymbol: Map<number, SymbolInfo> = new Map();
 
@@ -124,6 +143,15 @@ export class DebugInfo {
             }
         }
     }
+
+    public finalize() {
+        // Build fileIsLibrary map
+        for (const mod of this.modules.values()) {
+            if (mod.libId !== undefined || mod.lib) {
+                this.fileIsLibrary.set(mod.fileId, true);
+            }
+        }
+    }
 }
 
 export class DebugInfoParser {
@@ -195,6 +223,23 @@ export class DebugInfoParser {
                         info.addSymbol(sym);
                     }
                     break;
+                case 'mod':
+                    if (props.has('id') && props.has('name') && props.has('file')) {
+                        const id = parseInt(props.get('id')!);
+                        const name = props.get('name')!.replace(/"/g, '');
+                        const fileId = parseInt(props.get('file')!);
+                        const libId = props.has('lib') ? parseInt(props.get('lib')!) : undefined;
+                        // Sometimes lib=... means it is in a lib? Or checks for existence?
+                        info.modules.set(id, { id, name, fileId, libId });
+                    }
+                    break;
+                case 'lib':
+                    if (props.has('id')) {
+                        const id = parseInt(props.get('id')!);
+                        const name = props.has('name') ? props.get('name')!.replace(/"/g, '') : '';
+                        info.libraries.set(id, { id, name });
+                    }
+                    break;
                 case 'line':
                     if (props.has('file') && props.has('line')) {
                         const fileId = parseInt(props.get('file')!);
@@ -223,6 +268,7 @@ export class DebugInfoParser {
             }
         }
 
+        info.finalize();
         return info;
     }
 
