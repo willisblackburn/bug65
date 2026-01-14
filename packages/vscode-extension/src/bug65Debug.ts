@@ -3,7 +3,7 @@ import {
     Logger, logger,
     LoggingDebugSession,
     InitializedEvent, TerminatedEvent, StoppedEvent, OutputEvent,
-    Thread, Scope, Source, Handles, Breakpoint
+    Thread, Scope, Source, Handles, Breakpoint, StackFrame
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import { Cpu6502, Memory, CpuRegisters, Bug65Host, DebugInfo, DebugInfoParser, Disassembler6502 } from 'bug65-core';
@@ -226,59 +226,95 @@ export class Bug65DebugSession extends LoggingDebugSession {
     }
 
     protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): void {
+        const startFrame = args.startFrame || 0;
+        const maxLevels = args.levels || 20;
+
+        const stackFrames = new Array<StackFrame>();
         const pc = this._cpu.getRegisters().PC;
+        const sp = this._cpu.getRegisters().SP;
+
+        // 1. Current Frame
+        this.addStackFrame(stackFrames, pc, 0);
+
+        // 2. Scan Stack for Return Addresses
+        // Stack grows down. Return addresses are pushed as (PC_high, PC_low).
+        // The value pushed is the address of the 3rd byte of JSR (instruction address + 2).
+        // JSR opcode is at address - 2.
+        // We scan from SP+1 up to 0xFE (0xFF is top, we need 2 bytes).
+        let stackPtr = sp + 1;
+        let frameId = 1;
+
+        while (stackPtr < 0xFE && stackFrames.length < (maxLevels + startFrame)) {
+            // Check for potential return address (2 bytes)
+            // Stack is in page 1 (0x100 - 0x1FF)
+            const low = this._memory.read(0x100 + stackPtr);
+            const high = this._memory.read(0x100 + stackPtr + 1);
+
+            // Reconstruct address 
+            const retAddrOnStack = (high << 8) | low;
+
+            // The JSR instruction itself started at (ValueOnStack - 2).
+            const jsrAddr = retAddrOnStack - 2;
+
+            // Check validity
+            if (jsrAddr >= 0 && jsrAddr <= 0xFFFF) {
+                // Check if opcode at jsrAddr is JSR (0x20)
+                const opcode = this._memory.read(jsrAddr);
+                if (opcode === 0x20) {
+                    const added = this.addStackFrame(stackFrames, jsrAddr, frameId);
+                    if (added) {
+                        frameId++;
+                    }
+                }
+            }
+            stackPtr++;
+        }
+
+        // Slice requested frames
+        const totalFrames = stackFrames.length;
+        const sentFrames = stackFrames.slice(startFrame, startFrame + maxLevels);
+
+        response.body = {
+            stackFrames: sentFrames,
+            totalFrames: totalFrames
+        };
+        this.sendResponse(response);
+    }
+
+    private addStackFrame(frames: StackFrame[], addr: number, id: number): boolean {
         let source: Source | undefined;
         let line = 0;
+        let name = `PC: $${addr.toString(16).toUpperCase()}`;
+
+        // Disassemble for context
+        const dasm = this._disassembler.disassemble(this._memory, addr);
+        name = `PC: $${addr.toString(16).toUpperCase()} ${dasm.asm}`;
 
         if (this._debugInfo) {
-            const lineInfo = this._debugInfo.getLineForAddress(pc);
+            const lineInfo = this._debugInfo.getLineForAddress(addr);
             if (lineInfo) {
                 line = lineInfo.line;
                 const textFile = this._debugInfo.files.get(lineInfo.fileId);
-
-                // Check if this file is a library file
                 const isLib = this._debugInfo.fileIsLibrary.get(lineInfo.fileId);
 
                 if (textFile && !isLib) {
-                    // Try to resolve absolute path
                     let sourcePath = textFile.name;
-
-                    // Use CWD for relative paths
                     if (!path.isAbsolute(sourcePath)) {
-                        // 1. Try resolving against CWD (default)
                         let candidate = path.join(this._cwd, sourcePath);
-
-                        // 2. Fallback: If not found, try resolving relative to parent of CWD.
                         if (!fs.existsSync(candidate)) {
                             const parentCwd = path.dirname(this._cwd);
                             const candidate2 = path.join(parentCwd, sourcePath);
-                            if (fs.existsSync(candidate2)) {
-                                candidate = candidate2;
-                            }
+                            if (fs.existsSync(candidate2)) candidate = candidate2;
                         }
                         sourcePath = candidate;
                     }
-
                     source = new Source(path.basename(sourcePath), sourcePath);
                 }
             }
         }
 
-        const dasm = this._disassembler.disassemble(this._memory, pc);
-
-        response.body = {
-            stackFrames: [
-                {
-                    id: 0,
-                    name: `PC: $${pc.toString(16).toUpperCase()}  ${dasm.asm}`,
-                    line: line,
-                    column: 0,
-                    source: source
-                }
-            ],
-            totalFrames: 1
-        };
-        this.sendResponse(response);
+        frames.push(new StackFrame(id, name, source, line));
+        return true;
     }
 
     protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments): void {
