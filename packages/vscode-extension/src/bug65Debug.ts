@@ -6,13 +6,14 @@ import {
     Thread, Scope, Source, Handles, Breakpoint, StackFrame
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { Cpu6502, Memory, CpuRegisters, Bug65Host, DebugInfo, DebugInfoParser, Disassembler6502, ProgramLoader } from 'bug65-core';
+import { Cpu6502, Memory, CpuRegisters, Bug65Host, DebugInfo, DebugInfoParser, Disassembler6502, ProgramLoader, CpuType } from 'bug65-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
 interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
     program: string;
     stopOnEntry?: boolean;
+    cpu?: string;
 }
 
 interface StepMode {
@@ -108,8 +109,8 @@ export class Bug65DebugSession extends LoggingDebugSession {
     private _stopOnEntry = false;
 
     private _stepMode: StepMode | undefined;
-    // private _ignoreBreakpointOnNextStep = false;
 
+    private _cpuType: CpuType = '6502';
 
     private _host: Bug65Host;
 
@@ -314,7 +315,21 @@ export class Bug65DebugSession extends LoggingDebugSession {
         }
 
         const data = fs.readFileSync(programPath);
-        const { loadAddr, resetAddr, spAddr } = ProgramLoader.load(this._memory, data);
+        const { loadAddr, resetAddr, spAddr, cpuType: headerCpuType } = ProgramLoader.load(this._memory, data);
+
+        // Determine CPU Type
+        // args.cpu overrides header
+        let effectiveCpuType: CpuType = '6502';
+        if (args.cpu && (args.cpu === '6502' || args.cpu === '65C02')) {
+            effectiveCpuType = args.cpu as CpuType;
+        } else if (headerCpuType) {
+            effectiveCpuType = headerCpuType;
+        }
+
+        this._cpuType = effectiveCpuType;
+        this._cpu.setCpuType(this._cpuType);
+        this.sendEvent(new OutputEvent(`[Bug65] CPU Type: ${this._cpuType}\n`, 'console'));
+
         this.loadDebugInfo(programPath);
 
         this.sendEvent(new OutputEvent(`[Bug65] Program loaded: Load=$${loadAddr.toString(16)} Reset=$${resetAddr.toString(16)} SP=$${spAddr.toString(16)}\n`, 'console'));
@@ -409,13 +424,13 @@ export class Bug65DebugSession extends LoggingDebugSession {
             try {
                 const debugObj = DebugInfoParser.parse(fs.readFileSync(dbgPath, 'utf8'));
                 this._debugInfo = debugObj;
-                this._disassembler = new Disassembler6502(this._debugInfo);
+                this._disassembler = new Disassembler6502(this._debugInfo, this._cpuType);
                 this.sendEvent(new OutputEvent(`[Bug65] Loaded debug info: ${dbgPath}\n`, 'console'));
             } catch (e) {
                 this.sendEvent(new OutputEvent(`[Bug65] Failed to parse debug info: ${e}\n`, 'stderr'));
             }
         } else {
-            this._disassembler = new Disassembler6502();
+            this._disassembler = new Disassembler6502(undefined, this._cpuType);
         }
     }
 
@@ -633,7 +648,6 @@ export class Bug65DebugSession extends LoggingDebugSession {
             addFlag("Interrupt (I)", 0x04);
             addFlag("Zero (Z)", 0x02);
             addFlag("Carry (C)", 0x01);
-        } else if (id === "stack") {
         } else if (id === "stack") {
             const sp = this._cpu.getRegisters().SP;
 

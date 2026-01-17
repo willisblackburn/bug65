@@ -1,5 +1,7 @@
 import { IMemory } from './memory';
 
+export type CpuType = '6502' | '65C02';
+
 export interface ICpu {
     reset(): void;
     step(): number; // Returns cycles taken

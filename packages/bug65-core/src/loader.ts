@@ -1,11 +1,13 @@
 
 import { IMemory } from './memory';
+import { CpuType } from './cpu-interface';
 
 export interface ProgramLoadResult {
     loadAddr: number;
     resetAddr: number;
     spAddr: number;
     entryPoint: number; // usually resetAddr
+    cpuType: CpuType;
 }
 
 export namespace ProgramLoader {
@@ -23,6 +25,7 @@ export namespace ProgramLoader {
         let resetAddr = 0x0200;
         let spAddr = 0x00;
         let offset = 0;
+        let cpuType: CpuType = '6502';
 
         // Use Buffer vs Uint8Array handling
         // slice works on both, toString might vary.
@@ -53,6 +56,8 @@ export namespace ProgramLoader {
             } else {
                 resetAddr = loadAddr;
             }
+
+            cpuType = data[6] === 1 ? '65C02' : '6502';
         } else {
             // Raw binary
             // Default resetAddr to loadAddr if not specified? 
@@ -80,7 +85,8 @@ export namespace ProgramLoader {
             loadAddr,
             resetAddr,
             spAddr,
-            entryPoint: resetAddr
+            entryPoint: resetAddr,
+            cpuType
         };
     }
 }

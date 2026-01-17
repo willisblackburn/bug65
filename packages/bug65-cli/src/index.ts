@@ -1,11 +1,11 @@
 
-import { Cpu6502, Memory, Flags, Bug65Host, Disassembler6502, DebugInfo, DebugInfoParser, ProgramLoader } from 'bug65-core';
+import { Cpu6502, Memory, Flags, Bug65Host, Disassembler6502, DebugInfo, DebugInfoParser, ProgramLoader, CpuType } from 'bug65-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
 function printHelp() {
-    console.log("Usage: bug65 [--trace|-t] <program.bin> [start_address_hex]");
-    console.log("Example: bug65 --trace program.bin 0200");
+    console.log("Usage: bug65 [--trace|-t] [--cpu <type>] <program.bin> [start_address_hex]");
+    console.log("Example: bug65 --trace --cpu 65C02 program.bin 0200");
 }
 
 function main() {
@@ -14,6 +14,7 @@ function main() {
     let traceMode: 'off' | 'source' | 'disassemble' = 'off';
     let programPath: string | null = null;
     let specifiedLoadAddr: number | null = null;
+    let specifiedCpuType: CpuType | null = null;
 
     // Parse args
     let dbgFileArg: string | null = null;
@@ -35,6 +36,19 @@ function main() {
                 dbgFileArg = args[++i];
             } else {
                 console.error("Error: --dbgfile requires an argument");
+                process.exit(1);
+            }
+        } else if (args[i] === '--cpu') {
+            if (i + 1 < args.length) {
+                const type = args[++i];
+                if (type === '6502' || type === '65C02') {
+                    specifiedCpuType = type;
+                } else {
+                    console.error(`Invalid CPU type: ${type}`);
+                    process.exit(1);
+                }
+            } else {
+                console.error("Error: --cpu requires an argument");
                 process.exit(1);
             }
         } else if (!programPath) {
@@ -70,8 +84,13 @@ function main() {
         // Header check for 'sim65'
         // Header check for 'sim65'
         // Program Loader
+        // Program Loader
         const loadOptions = specifiedLoadAddr !== null ? { loadAddr: specifiedLoadAddr } : undefined;
-        const { loadAddr, resetAddr, spAddr } = ProgramLoader.load(memory, data, loadOptions);
+        const { loadAddr, resetAddr, spAddr, cpuType: headerCpuType } = ProgramLoader.load(memory, data, loadOptions);
+
+        const effectiveCpuType = specifiedCpuType || headerCpuType || '6502';
+        console.error(`CPU Type: ${effectiveCpuType}`);
+        cpu.setCpuType(effectiveCpuType);
 
         console.error(`  SP Address: $${spAddr.toString(16).padStart(2, '0')}`);
         console.error(`  Load Address: $${loadAddr.toString(16).padStart(4, '0')}`);
@@ -132,7 +151,7 @@ function main() {
             console.error("No debug info file found.");
         }
 
-        const disassembler = new Disassembler6502(debugInfo);
+        const disassembler = new Disassembler6502(debugInfo, effectiveCpuType);
 
         // Source cache
         const sourceCache = new Map<number, string[]>();

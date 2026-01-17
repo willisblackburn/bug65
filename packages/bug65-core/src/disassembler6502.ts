@@ -1,19 +1,25 @@
-
 import { IMemory } from './memory';
 import { DebugInfo } from './debugInfo';
+import { CpuType } from './cpu-interface';
 
 export class Disassembler6502 {
     private debugInfo?: DebugInfo;
+    private cpuType: CpuType = '6502';
 
-    constructor(debugInfo?: DebugInfo) {
+    constructor(debugInfo?: DebugInfo, cpuType: CpuType = '6502') {
         this.debugInfo = debugInfo;
+        this.cpuType = cpuType;
+    }
+
+    public setCpuType(type: CpuType) {
+        this.cpuType = type;
     }
 
     public disassemble(memory: IMemory, pc: number): { asm: string, bytes: number[], count: number } {
         const opcode = memory.read(pc);
         const entry = OPCODES[opcode];
 
-        if (!entry) {
+        if (!entry || (entry.cpu === '65C02' && this.cpuType !== '65C02')) {
             return { asm: `DB $${opcode.toString(16).toUpperCase().padStart(2, '0')} ???`, bytes: [opcode], count: 1 };
         }
 
@@ -129,6 +135,25 @@ export class Disassembler6502 {
                     operandStr = sym ? sym : `$${dest.toString(16).toUpperCase().padStart(4, '0')}`;
                 }
                 break;
+            case 'iax': // JMP (Abs,X)
+                len = 3;
+                bytes.push(memory.read(pc + 1));
+                bytes.push(memory.read(pc + 2));
+                {
+                    const addr = (bytes[2] << 8) | bytes[1];
+                    const sym = this.resolveSymbol(addr, true);
+                    operandStr = `(${sym ? sym : '$' + addr.toString(16).toUpperCase().padStart(4, '0')},X)`;
+                }
+                break;
+            case 'izp': // (ZP)
+                len = 2;
+                bytes.push(memory.read(pc + 1));
+                {
+                    const addr = bytes[1];
+                    const sym = this.resolveSymbol(addr, false);
+                    operandStr = `(${sym ? sym : '$' + addr.toString(16).toUpperCase().padStart(2, '0')})`;
+                }
+                break;
         }
 
         let asm = entry.name;
@@ -168,8 +193,7 @@ export class Disassembler6502 {
 }
 
 // Minimal Opcode Table (Name, Mode)
-// Derived from standard 6502 list (no 65C02)
-interface OpcodeEntry { name: string; mode: string; }
+interface OpcodeEntry { name: string; mode: string; cpu?: CpuType; }
 
 const OPCODES: { [key: number]: OpcodeEntry } = {
     0x00: { name: 'BRK', mode: 'imp' },
@@ -338,4 +362,33 @@ const OPCODES: { [key: number]: OpcodeEntry } = {
     0xF9: { name: 'SBC', mode: 'aby' },
     0xFD: { name: 'SBC', mode: 'abx' },
     0xFE: { name: 'INC', mode: 'abx' },
+
+    // 65C02
+    0x04: { name: 'TSB', mode: 'zp', cpu: '65C02' },
+    0x0C: { name: 'TSB', mode: 'abs', cpu: '65C02' },
+    0x12: { name: 'ORA', mode: 'izp', cpu: '65C02' },
+    0x14: { name: 'TRB', mode: 'zp', cpu: '65C02' },
+    0x1A: { name: 'INC', mode: 'acc', cpu: '65C02' },
+    0x1C: { name: 'TRB', mode: 'abs', cpu: '65C02' },
+    0x32: { name: 'AND', mode: 'izp', cpu: '65C02' },
+    0x34: { name: 'BIT', mode: 'zpx', cpu: '65C02' },
+    0x3A: { name: 'DEC', mode: 'acc', cpu: '65C02' },
+    0x3C: { name: 'BIT', mode: 'abx', cpu: '65C02' },
+    0x52: { name: 'EOR', mode: 'izp', cpu: '65C02' },
+    0x5A: { name: 'PHY', mode: 'imp', cpu: '65C02' },
+    0x64: { name: 'STZ', mode: 'zp', cpu: '65C02' },
+    0x72: { name: 'ADC', mode: 'izp', cpu: '65C02' },
+    0x74: { name: 'STZ', mode: 'zpx', cpu: '65C02' },
+    0x7A: { name: 'PLY', mode: 'imp', cpu: '65C02' },
+    0x7C: { name: 'JMP', mode: 'iax', cpu: '65C02' },
+    0x80: { name: 'BRA', mode: 'rel', cpu: '65C02' },
+    0x89: { name: 'BIT', mode: 'imm', cpu: '65C02' },
+    0x92: { name: 'STA', mode: 'izp', cpu: '65C02' },
+    0x9C: { name: 'STZ', mode: 'abs', cpu: '65C02' },
+    0x9E: { name: 'STZ', mode: 'abx', cpu: '65C02' },
+    0xB2: { name: 'LDA', mode: 'izp', cpu: '65C02' },
+    0xD2: { name: 'CMP', mode: 'izp', cpu: '65C02' },
+    0xDA: { name: 'PHX', mode: 'imp', cpu: '65C02' },
+    0xF2: { name: 'SBC', mode: 'izp', cpu: '65C02' },
+    0xFA: { name: 'PLX', mode: 'imp', cpu: '65C02' },
 };

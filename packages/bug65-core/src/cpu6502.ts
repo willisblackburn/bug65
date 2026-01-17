@@ -1,4 +1,4 @@
-import { ICpu, CpuRegisters, Flags } from './cpu-interface';
+import { ICpu, CpuRegisters, Flags, CpuType } from './cpu-interface';
 import { IMemory } from './memory';
 
 export class Cpu6502 implements ICpu {
@@ -15,9 +15,15 @@ export class Cpu6502 implements ICpu {
 
     public onTrap: ((pc: number) => boolean) | undefined;
     public breakpoints: Map<number, Set<string>> = new Map();
+    private _cpuType: CpuType = '6502';
 
-    constructor(memory: IMemory) {
+    constructor(memory: IMemory, cpuType: CpuType = '6502') {
         this.memory = memory;
+        this._cpuType = cpuType;
+    }
+
+    public setCpuType(type: CpuType) {
+        this._cpuType = type;
     }
 
     reset(): void {
@@ -122,6 +128,13 @@ export class Cpu6502 implements ICpu {
         const high = this.memory.read((ptr + 1) & 0xFF);
         const addr = ((high << 8) | low) + this.Y;
         return addr & 0xFFFF;
+    }
+
+    protected addrZeroPageIndirect(): number {
+        const ptr = this.memory.read(this.PC++);
+        const low = this.memory.read(ptr);
+        const high = this.memory.read((ptr + 1) & 0xFF);
+        return (high << 8) | low;
     }
 
     protected executeOpcode(opcode: number): void {
@@ -335,6 +348,98 @@ export class Cpu6502 implements ICpu {
             case 0x84: this.memory.write(this.addrZeroPage(), this.Y); this.cycles += 3; break;
             case 0x94: this.memory.write(this.addrZeroPageX(), this.Y); this.cycles += 4; break;
             case 0x8C: this.memory.write(this.addrAbsolute(), this.Y); this.cycles += 4; break;
+
+            // --- 65C02 Instructions ---
+            case 0x80: // BRA Rel
+                if (this._cpuType === '65C02') { this.branch(true); }
+                break;
+            case 0xDA: // PHX
+                if (this._cpuType === '65C02') { this.push(this.X); this.cycles += 3; }
+                break;
+            case 0x5A: // PHY
+                if (this._cpuType === '65C02') { this.push(this.Y); this.cycles += 3; }
+                break;
+            case 0xFA: // PLX
+                if (this._cpuType === '65C02') { this.X = this.pop(); this.setFlag(Flags.Zero, this.X === 0); this.setFlag(Flags.Negative, (this.X & 0x80) !== 0); this.cycles += 4; }
+                break;
+            case 0x7A: // PLY
+                if (this._cpuType === '65C02') { this.Y = this.pop(); this.setFlag(Flags.Zero, this.Y === 0); this.setFlag(Flags.Negative, (this.Y & 0x80) !== 0); this.cycles += 4; }
+                break;
+            case 0x1A: // INC A
+                if (this._cpuType === '65C02') { this.A = (this.A + 1) & 0xFF; this.setFlag(Flags.Zero, this.A === 0); this.setFlag(Flags.Negative, (this.A & 0x80) !== 0); this.cycles += 2; }
+                break;
+            case 0x3A: // DEC A
+                if (this._cpuType === '65C02') { this.A = (this.A - 1) & 0xFF; this.setFlag(Flags.Zero, this.A === 0); this.setFlag(Flags.Negative, (this.A & 0x80) !== 0); this.cycles += 2; }
+                break;
+
+            // STZ
+            case 0x64: // STZ ZP
+                if (this._cpuType === '65C02') { this.memory.write(this.addrZeroPage(), 0); this.cycles += 3; }
+                break;
+            case 0x74: // STZ ZP,X
+                if (this._cpuType === '65C02') { this.memory.write(this.addrZeroPageX(), 0); this.cycles += 4; }
+                break;
+            case 0x9C: // STZ Abs
+                if (this._cpuType === '65C02') { this.memory.write(this.addrAbsolute(), 0); this.cycles += 4; }
+                break;
+            case 0x9E: // STZ Abs,X
+                if (this._cpuType === '65C02') { this.memory.write(this.addrAbsoluteX(), 0); this.cycles += 5; }
+                break;
+
+            // TRB / TSB
+            case 0x14: // TRB ZP
+                if (this._cpuType === '65C02') { this.trb(this.addrZeroPage()); this.cycles += 5; }
+                break;
+            case 0x1C: // TRB Abs
+                if (this._cpuType === '65C02') { this.trb(this.addrAbsolute()); this.cycles += 6; }
+                break;
+            case 0x04: // TSB ZP
+                if (this._cpuType === '65C02') { this.tsb(this.addrZeroPage()); this.cycles += 5; }
+                break;
+            case 0x0C: // TSB Abs
+                if (this._cpuType === '65C02') { this.tsb(this.addrAbsolute()); this.cycles += 6; }
+                break;
+
+            // BIT Extensions
+            case 0x34: // BIT ZP,X
+                if (this._cpuType === '65C02') { this.bit(this.addrZeroPageX()); this.cycles += 4; }
+                break;
+            case 0x3C: // BIT Abs,X
+                if (this._cpuType === '65C02') { this.bit(this.addrAbsoluteX()); this.cycles += 4; }
+                break;
+            case 0x89: // BIT Imm
+                if (this._cpuType === '65C02') {
+                    const val = this.fetchByte();
+                    this.setFlag(Flags.Zero, (this.A & val) === 0);
+                    this.cycles += 2;
+                }
+                break;
+
+            // JMP (Abs,X)
+            case 0x7C:
+                if (this._cpuType === '65C02') {
+                    // JMP (Abs,X) -> Jump to address stored at (Abs+X)
+                    // Wait, addrAbsoluteX() returns (Abs+X).
+                    // We need to readWord at that address.
+                    // But standard JMP (Ind) has a 6502 bug with page crossing. 65C02 fixes it?
+                    // JMP (Abs,X) is straightforward.
+                    const ptr = this.addrAbsoluteX();
+                    const low = this.memory.read(ptr);
+                    const high = this.memory.read((ptr + 1) & 0xFFFF); // Wrap?
+                    this.PC = (high << 8) | low;
+                    this.cycles += 6;
+                }
+                break;
+
+            // (ZP) Addressing
+            case 0x72: if (this._cpuType === '65C02') { this.ADC(this.memory.read(this.addrZeroPageIndirect())); this.cycles += 5; } break;
+            case 0x32: if (this._cpuType === '65C02') { this.AND(this.memory.read(this.addrZeroPageIndirect())); this.cycles += 5; } break;
+            case 0xD2: if (this._cpuType === '65C02') { this.CMP(this.memory.read(this.addrZeroPageIndirect())); this.cycles += 5; } break;
+            case 0x52: if (this._cpuType === '65C02') { this.EOR(this.memory.read(this.addrZeroPageIndirect())); this.cycles += 5; } break;
+            case 0xB2: if (this._cpuType === '65C02') { this.LDA(this.memory.read(this.addrZeroPageIndirect())); this.cycles += 5; } break;
+            case 0x12: if (this._cpuType === '65C02') { this.ORA(this.memory.read(this.addrZeroPageIndirect())); this.cycles += 5; } break;
+            case 0xF2: if (this._cpuType === '65C02') { this.SBC(this.memory.read(this.addrZeroPageIndirect())); this.cycles += 5; } break;
+            case 0x92: if (this._cpuType === '65C02') { this.memory.write(this.addrZeroPageIndirect(), this.A); this.cycles += 5; } break;
 
             default:
                 throw new Error(`Unknown opcode: ${opcode.toString(16)}`);
@@ -733,4 +838,35 @@ export class Cpu6502 implements ICpu {
             this.breakpoints.clear();
         }
     }
+
+    // --- 65C02 Helpers ---
+    protected fetchByte(): number {
+        const val = this.memory.read(this.PC);
+        this.PC = (this.PC + 1) & 0xFFFF;
+        return val;
+    }
+
+    protected trb(addr: number): void {
+        let val = this.memory.read(addr);
+        const result = this.A & val;
+        this.setFlag(Flags.Zero, result === 0);
+        val &= ~this.A;
+        this.memory.write(addr, val);
+    }
+
+    protected tsb(addr: number): void {
+        let val = this.memory.read(addr);
+        const result = this.A & val;
+        this.setFlag(Flags.Zero, result === 0);
+        val |= this.A;
+        this.memory.write(addr, val);
+    }
+
+    protected bit(addr: number): void {
+        const val = this.memory.read(addr);
+        this.setFlag(Flags.Zero, (this.A & val) === 0);
+        this.setFlag(Flags.Negative, (val & 0x80) !== 0);
+        this.setFlag(Flags.Overflow, (val & 0x40) !== 0);
+    }
 }
+
