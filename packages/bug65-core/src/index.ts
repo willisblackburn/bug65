@@ -8,3 +8,4 @@ export * from './disassembler6502';
 export function hello() {
     return "Hello from sim65-core";
 }
+export * from './loader';

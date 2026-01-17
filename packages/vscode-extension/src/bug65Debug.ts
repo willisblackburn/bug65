@@ -6,7 +6,7 @@ import {
     Thread, Scope, Source, Handles, Breakpoint, StackFrame
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { Cpu6502, Memory, CpuRegisters, Bug65Host, DebugInfo, DebugInfoParser, Disassembler6502 } from 'bug65-core';
+import { Cpu6502, Memory, CpuRegisters, Bug65Host, DebugInfo, DebugInfoParser, Disassembler6502, ProgramLoader } from 'bug65-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -321,8 +321,10 @@ export class Bug65DebugSession extends LoggingDebugSession {
         }
 
         const data = fs.readFileSync(programPath);
-        const { loadAddr, resetAddr, spAddr } = this.loadProgram(data);
+        const { loadAddr, resetAddr, spAddr } = ProgramLoader.load(this._memory, data);
         this.loadDebugInfo(programPath);
+
+        this.sendEvent(new OutputEvent(`[Bug65] Program loaded: Load=$${loadAddr.toString(16)} Reset=$${resetAddr.toString(16)} SP=$${spAddr.toString(16)}\n`, 'console'));
 
         this._cpu.reset();
 
@@ -354,29 +356,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
         }
     }
 
-    private loadProgram(data: Buffer): { loadAddr: number, resetAddr: number, spAddr: number } {
-        const header = data.slice(0, 5).toString('ascii');
-        let loadAddr = 0x0200;
-        let resetAddr = 0x0200;
-        let spAddr = 0x00;
-        let offset = 0;
 
-        if (header === 'sim65') {
-            offset = 12;
-            spAddr = data[7];
-            const fileLoadAddr = (data[9] << 8) | data[8];
-            const fileResetAddr = (data[11] << 8) | data[10];
-            loadAddr = fileLoadAddr;
-            resetAddr = fileResetAddr;
-            this.sendEvent(new OutputEvent(`[Bug65] Header detected: Load=$${loadAddr.toString(16)} Reset=$${resetAddr.toString(16)} SP=$${spAddr.toString(16)}\n`, 'console'));
-        }
-
-        const programData = new Uint8Array(data.slice(offset));
-        this._memory.load(loadAddr, programData);
-        this._memory.writeWord(0xFFFC, resetAddr);
-
-        return { loadAddr, resetAddr, spAddr };
-    }
 
     protected setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): void {
         const path = args.source.path as string;
