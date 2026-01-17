@@ -120,7 +120,7 @@ function main() {
         // Initializing host
         const host = new Bug65Host(cpu, memory);
         host.setSpAddress(spAddr);
-        host.install();
+
 
         host.onExit = (code) => {
             process.exit(code);

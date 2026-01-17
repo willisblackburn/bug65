@@ -20,11 +20,11 @@ export class Bug65Host {
     private readonly ADDR_EXIT = 0xFFF9;
 
     constructor(cpu: Cpu6502, memory: IMemory) {
+        if (cpu.onTrap) {
+            throw new Error("CPU onTrap handler is already set.");
+        }
         this.cpu = cpu;
         this.memory = memory;
-    }
-
-    install(): void {
         this.cpu.onTrap = (pc: number) => this.handleTrap(pc);
     }
 

@@ -111,13 +111,25 @@ export class Bug65DebugSession extends LoggingDebugSession {
     private _stepMode: StepMode | undefined;
 
 
+    private _host: Bug65Host;
+
     constructor() {
         super("bug65-debug.txt");
 
         this._memory = new Memory();
         this._cpu = new Cpu6502(this._memory);
         this._disassembler = new Disassembler6502();
+        this._host = new Bug65Host(this._cpu, this._memory);
 
+        // Setup Host events once
+        this._host.onWrite = (char) => {
+            this.sendEvent(new OutputEvent(String.fromCharCode(char), 'stdout'));
+        };
+
+        this._host.onExit = (code) => {
+            this.sendEvent(new OutputEvent(`[Bug65] Program exited with code ${code}\n`, 'console'));
+            this.sendEvent(new TerminatedEvent());
+        };
     }
 
     // Helper for StepMode classes
@@ -176,41 +188,6 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
             // 3. Execute
             this._cpu.step(true);
-
-            // 4. Post-execution Check
-            // Some modes (StepOut) might need to check AFTER execution.
-            // But we unified into one `check` method.
-            // If StepOut checks SP > target, it should do it BEFORE or AFTER?
-            // If we check BEFORE, and we differ, we stop.
-            // But if we check BEFORE executing `RTS`, SP is still small.
-            // So we need to check AFTER.
-            // BUT StepIn needs to check BEFORE (are we in range?).
-            // If we check BEFORE, StepIn works.
-            // If we check AFTER, StepIn works (we moved to new PC).
-            // Does StepOut work BEFORE? No.
-            // So we really need to check AFTER execution?
-
-            // Wait, the NextMode checks JSR opcode BEFORE execution to swap mode.
-            // If we check AFTER, we executed JSR, PC is now Inside subroutine.
-            // So NextMode MUST check BEFORE.
-
-            // Conflict: NextMode checks BEFORE (opcode), StepOut checks AFTER (sp result).
-            // Solution: We check inside the loop. 
-            // If we check BEFORE execution:
-            //   - StepIn: checks PC. If outside, STOP. correct.
-            //   - Next: checks Opcode. If JSR, REPLACE. correct.
-            //   - StepOut: checks SP. If SP > target, STOP. 
-            //       - Issue: RTS instruction changes SP.
-            //       - If we check BEFORE `RTS`, SP is still un-popped. We won't stop.
-            //       - executed RTS. Loop continues.
-            //       - Next iteration: check BEFORE next instruction. SP is now popped. STOP. Correct.
-
-            // So checking BEFORE execution works for ALL cases, provided StepOut waits for the *next* instruction cycle to detect the change.
-            // This effectively means "Run until we are ABOUT to execute an instruction with SP > target".
-            // Which is exactly "Run until returned".
-
-            // So the Single Check at TOP of loop (Step 2) is correct.
-            // We do NOT need a post-execution check.
         }
 
         if (running) {
@@ -349,19 +326,10 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
         this._cpu.reset();
 
-        // Initialize Host
-        const host = new Bug65Host(this._cpu, this._memory);
-        host.setSpAddress(spAddr);
-        host.install();
+        // Configure Host for this run
+        this._host.setSpAddress(spAddr);
 
-        host.onWrite = (char) => {
-            this.sendEvent(new OutputEvent(String.fromCharCode(char), 'stdout'));
-        };
 
-        host.onExit = (code) => {
-            this.sendEvent(new OutputEvent(`[Bug65] Program exited with code ${code}\n`, 'console'));
-            this.sendEvent(new TerminatedEvent());
-        };
 
         // Fill hooks with RTS
         for (let a = 0xFFF0; a <= 0xFFF9; a++) {
