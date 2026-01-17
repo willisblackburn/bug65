@@ -36,15 +36,14 @@ class NextMode implements StepMode {
     constructor(private allowedRanges: { start: number, end: number }[]) { }
 
     step(session: Bug65DebugSession, pc: number, opcode: number): StepMode | undefined {
-        // If we encounter a JSR (opcode 0x20)
-        // We replace with RunToMode targeting instruction after JSR (PB + 3)
-        // And we continue execution.
-        if (opcode === 0x20) { // JSR
-            return new RunToMode(pc + 3, this);
-        }
-
         for (const range of this.allowedRanges) {
             if (pc >= range.start && pc <= range.end) {
+                // If we encounter a JSR (opcode 0x20)
+                // We replace with RunToMode targeting instruction after JSR (PB + 3)
+                // And we continue execution.
+                if (opcode === 0x20) { // JSR
+                    return new RunToMode(pc + 3, this);
+                }
                 // Continue with this mode
                 return this;
             }
@@ -59,8 +58,8 @@ class RunToMode implements StepMode {
 
     step(session: Bug65DebugSession, pc: number, opcode: number): StepMode | undefined {
         if (pc === this.targetPC) {
-            // We reached target. Restore previous mode.
-            return this.restoreMode;
+            // We reached target. Switch to the previous mode.
+            return this.restoreMode !== undefined ? this.restoreMode.step(session, pc, opcode) : undefined;
         }
         // Continue with this mode (running to target)
         return this;
@@ -109,6 +108,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
     private _stopOnEntry = false;
 
     private _stepMode: StepMode | undefined;
+    // private _ignoreBreakpointOnNextStep = false;
 
 
     private _host: Bug65Host;
@@ -150,32 +150,15 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this.sendEvent(new InitializedEvent());
     }
 
-    private runLoop() {
+    private runLoop(ignoreInitialBreakpoint: boolean = false) {
         const batch = 1000;
         let running = true;
-
-        // If we are currently at a breakpoint, step over it first (ignoring the breakpoint)
-        if (this._cpu.breakpoints.has(this._cpu.getRegisters().PC)) {
-            const cycles = this._cpu.step(true);
-            if (cycles === 0) {
-                this.sendEvent(new StoppedEvent('pause', Bug65DebugSession.THREAD_ID));
-                return;
-            }
-        }
 
         for (let i = 0; i < batch; i++) {
             const pc = this._cpu.getRegisters().PC;
             const opcode = this._memory.read(pc); // Peek opcode
 
-            // 1. Check User Breakpoints (always override step mode)
-            if (this._cpu.breakpoints.has(pc)) {
-                this._stepMode = undefined; // Clear step mode
-                this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
-                running = false;
-                break;
-            }
-
-            // 2. Pre-execution Check
+            // 1. Check Step Mode
             if (this._stepMode) {
                 this._stepMode = this._stepMode.step(this, pc, opcode);
 
@@ -186,12 +169,21 @@ export class Bug65DebugSession extends LoggingDebugSession {
                 }
             }
 
-            // 3. Execute
-            this._cpu.step(true);
+            // 2. Execute
+            // Ignore breakpoint only if explicitly requested and it's the first instruction
+            const cycles = this._cpu.step(ignoreInitialBreakpoint && i === 0);
+
+            if (cycles === 0) {
+                // Hit a breakpoint (or trap)
+                this._stepMode = undefined; // Clear step mode
+                this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
+                running = false;
+                break;
+            }
         }
 
         if (running) {
-            setTimeout(() => this.runLoop(), 1);
+            setTimeout(() => this.runLoop(false), 1);
         }
     }
 
@@ -236,7 +228,8 @@ export class Bug65DebugSession extends LoggingDebugSession {
         const pc = this._cpu.getRegisters().PC;
         const span = this.getCurrentSpan(pc);
         this._stepMode = new NextMode(span ? [span] : []);
-        this.runLoop();
+        // Ignore potentially current breakpoint
+        this.runLoop(true);
         this.sendResponse(response);
     }
 
@@ -244,14 +237,14 @@ export class Bug65DebugSession extends LoggingDebugSession {
         const pc = this._cpu.getRegisters().PC;
         const span = this.getCurrentSpan(pc);
         this._stepMode = new StepInMode(span ? [span] : []);
-        this.runLoop();
+        this.runLoop(true);
         this.sendResponse(response);
     }
 
     protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): void {
         const sp = this._cpu.getRegisters().SP;
         this._stepMode = new StepOutMode(sp);
-        this.runLoop();
+        this.runLoop(true);
         this.sendResponse(response);
     }
 
@@ -354,6 +347,14 @@ export class Bug65DebugSession extends LoggingDebugSession {
         if (!this._stopOnEntry) {
             this.runLoop();
         }
+    }
+
+    protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
+        // Clear any step mode
+        this._stepMode = undefined;
+        // Ignore potentially current breakpoint
+        this.runLoop(true);
+        this.sendResponse(response);
     }
 
 
