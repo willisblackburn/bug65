@@ -220,7 +220,25 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
     private getCurrentSpan(pc: number): { start: number, end: number } | undefined {
         if (!this._debugInfo) return undefined;
-        // Search segments and spans
+
+        // 1. Try to find the "best" line info (prioritizing C source)
+        const lineInfo = this._debugInfo.getLineForAddress(pc);
+        if (lineInfo && lineInfo.spanId !== undefined) {
+            const span = this._debugInfo.spans.get(lineInfo.spanId);
+            if (span) {
+                const seg = this._debugInfo.segments.get(span.segId);
+                if (seg) {
+                    const start = seg.start + span.start;
+                    const end = start + span.size - 1;
+                    // Double check PC is in range (it should be if mapped)
+                    if (pc >= start && pc <= end) {
+                        return { start, end };
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback: Search all spans (spatial) if no line mapping found
         for (const seg of this._debugInfo.segments.values()) {
             if (pc >= seg.start && pc < (seg.start + seg.size)) {
                 for (const span of this._debugInfo.spans.values()) {

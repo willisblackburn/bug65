@@ -68,7 +68,7 @@ export class DebugInfo {
     // Derived map: fileId -> isLibrary
     public fileIsLibrary: Map<number, boolean> = new Map();
 
-    private addressToLine: Map<number, LineInfo> = new Map();
+    private addressToLine: Map<number, LineInfo[]> = new Map();
     private addressToSymbol: Map<number, SymbolInfo> = new Map();
 
     public addSymbol(sym: SymbolInfo) {
@@ -93,32 +93,18 @@ export class DebugInfo {
         return this.addressToSymbol.get(addr);
     }
 
-    // Mapping from address to nearest line info
-    // Since lines map to spans (ranges), we can lookup address in spans.
-
+    // Return the "best" line for an address (backward compatibility)
     public getLineForAddress(addr: number): LineInfo | undefined {
-        // Simple search (can be optimized with interval tree or sorted array)
-        // Find span containing addr
-        for (const span of this.spans.values()) {
-            if (addr >= span.start && addr < (span.start + span.size)) {
-                // Find line referencing this span?
-                // Actually 'line' entries usually point to 'span' or range?
-                // Or 'line' entries have 'file' and 'line' and direct range?
-                // The format usually links line -> span or line -> address range?
-                // Wait, searches say: "Line information ... Connects specific lines ... to ranges".
-                // Typical format: line id=..., file=..., line=..., span=... ??
-                // Let's assume line has direct file/line and maybe range or links to a span.
-                // If line links to span, we search spans.
+        const lines = this.addressToLine.get(addr);
+        if (!lines || lines.length === 0) return undefined;
 
-                // Reverse lookup: find line that points to this span
-                // This is checking ALL lines, slow. 
-            }
-        }
+        // Heuristic: Prefer type=1 (C/High-level)
+        const best = lines.find(l => l.type === 1);
+        return best || lines[0];
+    }
 
-        // Let's assume we parse "line" entries and build an index.
-        // If "line" has "span" or "type=2,val=..."
-
-        return this.addressToLine.get(addr);
+    public getAllLinesForAddress(addr: number): LineInfo[] {
+        return this.addressToLine.get(addr) || [];
     }
 
     public addLineMapping(spanId: number, lineInfo: LineInfo) {
@@ -127,18 +113,14 @@ export class DebugInfo {
             const segStart = this.segments.get(span.segId)?.start || 0;
             for (let i = 0; i < span.size; i++) {
                 const addr = segStart + span.start + i;
-                const existing = this.addressToLine.get(addr);
-
-                // Heuristic: Prefer type=1 (C/High-level) over undefined (ASM)
-                if (!existing || (existing.type !== 1 && lineInfo.type === 1)) {
-                    this.addressToLine.set(addr, lineInfo);
-                } else if (!existing && lineInfo.type !== 1) {
-                    this.addressToLine.set(addr, lineInfo);
+                let list = this.addressToLine.get(addr);
+                if (!list) {
+                    list = [];
+                    this.addressToLine.set(addr, list);
                 }
-                // If existing is 1 and new is not 1, keep existing.
-                // If both are same type, overwrite? (Standard behavior)
-                else if (existing && existing.type === lineInfo.type) {
-                    this.addressToLine.set(addr, lineInfo);
+                // Avoid duplicates
+                if (!list.some(existing => existing.fileId === lineInfo.fileId && existing.line === lineInfo.line)) {
+                    list.push(lineInfo);
                 }
             }
         }
