@@ -14,7 +14,7 @@ export class Cpu6502 implements ICpu {
     protected cycles: number = 0;
 
     public onTrap: ((pc: number) => boolean) | undefined;
-    public breakpoints: Set<number> = new Set();
+    public breakpoints: Map<number, Set<string>> = new Map();
 
     constructor(memory: IMemory) {
         this.memory = memory;
@@ -700,15 +700,37 @@ export class Cpu6502 implements ICpu {
         return (this.Status & flag) !== 0;
     }
 
-    public addBreakpoint(addr: number): void {
-        this.breakpoints.add(addr);
+    // ... constr ...
+
+    public addBreakpoint(addr: number, group: string = "default"): void {
+        let groups = this.breakpoints.get(addr);
+        if (!groups) {
+            groups = new Set();
+            this.breakpoints.set(addr, groups);
+        }
+        groups.add(group);
     }
 
-    public removeBreakpoint(addr: number): void {
-        this.breakpoints.delete(addr);
+    public removeBreakpoint(addr: number, group: string = "default"): void {
+        const groups = this.breakpoints.get(addr);
+        if (groups) {
+            groups.delete(group);
+            if (groups.size === 0) {
+                this.breakpoints.delete(addr);
+            }
+        }
     }
 
-    public clearBreakpoints(): void {
-        this.breakpoints.clear();
+    public clearBreakpoints(group?: string): void {
+        if (group) {
+            for (const [addr, groups] of this.breakpoints) {
+                groups.delete(group);
+                if (groups.size === 0) {
+                    this.breakpoints.delete(addr);
+                }
+            }
+        } else {
+            this.breakpoints.clear();
+        }
     }
 }

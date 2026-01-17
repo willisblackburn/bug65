@@ -364,7 +364,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
         const clientLines = args.lines || [];
 
         // Clear existing breakpoints for this file (simplification)
-        this._cpu.clearBreakpoints(); // TODO: Only clear for this file?
+        this._cpu.clearBreakpoints(path);
 
         const actualBreakpoints = new Array<Breakpoint>();
 
@@ -380,7 +380,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
                             const seg = this._debugInfo.segments.get(span.segId);
                             if (seg) {
                                 const addr = seg.start + span.start;
-                                this._cpu.addBreakpoint(addr);
+                                this._cpu.addBreakpoint(addr, path);
                                 actualBreakpoints.push(new Breakpoint(true, l, 0, new Source(path, path)));
                                 continue;
                             }
