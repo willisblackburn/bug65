@@ -15,6 +15,89 @@ interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
     stopOnEntry?: boolean;
 }
 
+interface StepMode {
+    step(session: Bug65DebugSession, pc: number, opcode: number): StepMode | undefined;
+}
+
+class StepInMode implements StepMode {
+    constructor(private allowedRanges: { start: number, end: number }[]) { }
+
+    step(session: Bug65DebugSession, pc: number, opcode: number): StepMode | undefined {
+        for (const range of this.allowedRanges) {
+            if (pc >= range.start && pc <= range.end) {
+                return this;
+            }
+        }
+        return undefined;
+    }
+}
+
+class NextMode implements StepMode {
+    constructor(private allowedRanges: { start: number, end: number }[]) { }
+
+    step(session: Bug65DebugSession, pc: number, opcode: number): StepMode | undefined {
+        // If we encounter a JSR (opcode 0x20)
+        // We replace with RunToMode targeting instruction after JSR (PB + 3)
+        // And we continue execution.
+        if (opcode === 0x20) { // JSR
+            return new RunToMode(pc + 3, this);
+        }
+
+        for (const range of this.allowedRanges) {
+            if (pc >= range.start && pc <= range.end) {
+                // Continue with this mode
+                return this;
+            }
+        }
+        // Stop
+        return undefined;
+    }
+}
+
+class RunToMode implements StepMode {
+    constructor(private targetPC: number, private restoreMode: StepMode | undefined) { }
+
+    step(session: Bug65DebugSession, pc: number, opcode: number): StepMode | undefined {
+        if (pc === this.targetPC) {
+            // We reached target. Restore previous mode.
+            return this.restoreMode;
+        }
+        // Continue with this mode (running to target)
+        return this;
+    }
+}
+
+class StepOutMode implements StepMode {
+    constructor(private targetSP: number) { }
+
+    step(session: Bug65DebugSession, pc: number, opcode: number): StepMode | undefined {
+        if (opcode === 0x60) { // RTS
+            const sp = session.getAllRegisters().SP;
+            // Calculate hypothetical SP after RTS
+            // Pull PCL, Pull PCH => SP + 2
+            const newSP = sp + 2;
+
+            if (newSP > this.targetSP) {
+                // We are returning to a caller (or higher)
+                // Read return address from stack to know where we land
+                // Stack is at 0x100 + SP
+                // PCL at SP+1, PCH at SP+2
+
+                // Note: session.getAllRegisters().SP is current SP (before RTS)
+                const memory = session.getMemory();
+
+                const low = memory.read(0x100 + sp + 1);
+                const high = memory.read(0x100 + sp + 2);
+                const retAddr = ((high << 8) | low) + 1;
+
+                return new RunToMode(retAddr, undefined);
+            }
+        }
+        return this;
+    }
+}
+
+
 export class Bug65DebugSession extends LoggingDebugSession {
 
     private static THREAD_ID = 1;
@@ -25,10 +108,8 @@ export class Bug65DebugSession extends LoggingDebugSession {
     private _variableHandles = new Handles<string>();
     private _stopOnEntry = false;
 
-    private _stepMode: 'instruction' | 'line' | 'over' = 'instruction';
-    private _stepStartLine: number = 0;
-    private _stepStartFile: number = 0;
-    private _tempBreakpoint: number | undefined;
+    private _stepMode: StepMode | undefined;
+
 
     constructor() {
         super("bug65-debug.txt");
@@ -39,7 +120,14 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
     }
 
+    // Helper for StepMode classes
+    public getAllRegisters() {
+        return this._cpu.getRegisters();
+    }
 
+    public getMemory() {
+        return this._memory;
+    }
 
     protected initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments): void {
         response.body = response.body || {};
@@ -49,6 +137,170 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this.sendResponse(response);
         this.sendEvent(new InitializedEvent());
     }
+
+    private runLoop() {
+        const batch = 1000;
+        let running = true;
+
+        // If we are currently at a breakpoint, step over it first (ignoring the breakpoint)
+        if (this._cpu.breakpoints.has(this._cpu.getRegisters().PC)) {
+            const cycles = this._cpu.step(true);
+            if (cycles === 0) {
+                this.sendEvent(new StoppedEvent('pause', Bug65DebugSession.THREAD_ID));
+                return;
+            }
+        }
+
+        for (let i = 0; i < batch; i++) {
+            const pc = this._cpu.getRegisters().PC;
+            const opcode = this._memory.read(pc); // Peek opcode
+
+            // 1. Check User Breakpoints (always override step mode)
+            if (this._cpu.breakpoints.has(pc)) {
+                this._stepMode = undefined; // Clear step mode
+                this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
+                running = false;
+                break;
+            }
+
+            // 2. Pre-execution Check
+            if (this._stepMode) {
+                this._stepMode = this._stepMode.step(this, pc, opcode);
+
+                if (!this._stepMode) {
+                    this.sendEvent(new StoppedEvent('step', Bug65DebugSession.THREAD_ID));
+                    running = false;
+                    break;
+                }
+            }
+
+            // 3. Execute
+            this._cpu.step(true);
+
+            // 4. Post-execution Check
+            // Some modes (StepOut) might need to check AFTER execution.
+            // But we unified into one `check` method.
+            // If StepOut checks SP > target, it should do it BEFORE or AFTER?
+            // If we check BEFORE, and we differ, we stop.
+            // But if we check BEFORE executing `RTS`, SP is still small.
+            // So we need to check AFTER.
+            // BUT StepIn needs to check BEFORE (are we in range?).
+            // If we check BEFORE, StepIn works.
+            // If we check AFTER, StepIn works (we moved to new PC).
+            // Does StepOut work BEFORE? No.
+            // So we really need to check AFTER execution?
+
+            // Wait, the NextMode checks JSR opcode BEFORE execution to swap mode.
+            // If we check AFTER, we executed JSR, PC is now Inside subroutine.
+            // So NextMode MUST check BEFORE.
+
+            // Conflict: NextMode checks BEFORE (opcode), StepOut checks AFTER (sp result).
+            // Solution: We check inside the loop. 
+            // If we check BEFORE execution:
+            //   - StepIn: checks PC. If outside, STOP. correct.
+            //   - Next: checks Opcode. If JSR, REPLACE. correct.
+            //   - StepOut: checks SP. If SP > target, STOP. 
+            //       - Issue: RTS instruction changes SP.
+            //       - If we check BEFORE `RTS`, SP is still un-popped. We won't stop.
+            //       - executed RTS. Loop continues.
+            //       - Next iteration: check BEFORE next instruction. SP is now popped. STOP. Correct.
+
+            // So checking BEFORE execution works for ALL cases, provided StepOut waits for the *next* instruction cycle to detect the change.
+            // This effectively means "Run until we are ABOUT to execute an instruction with SP > target".
+            // Which is exactly "Run until returned".
+
+            // So the Single Check at TOP of loop (Step 2) is correct.
+            // We do NOT need a post-execution check.
+        }
+
+        if (running) {
+            setTimeout(() => this.runLoop(), 1);
+        }
+    }
+
+    private getCurrentSpan(pc: number): { start: number, end: number } | undefined {
+        if (!this._debugInfo) return undefined;
+        // Search segments and spans
+        for (const seg of this._debugInfo.segments.values()) {
+            if (pc >= seg.start && pc < (seg.start + seg.size)) {
+                for (const span of this._debugInfo.spans.values()) {
+                    if (span.segId === seg.id) {
+                        const start = seg.start + span.start;
+                        const end = start + span.size - 1; // Inclusive
+                        if (pc >= start && pc <= end) {
+                            return { start, end };
+                        }
+                    }
+                }
+            }
+        }
+        return undefined;
+    }
+
+    protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): void {
+        const pc = this._cpu.getRegisters().PC;
+        const span = this.getCurrentSpan(pc);
+        this._stepMode = new NextMode(span ? [span] : []);
+        this.runLoop();
+        this.sendResponse(response);
+    }
+
+    protected stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments): void {
+        const pc = this._cpu.getRegisters().PC;
+        const span = this.getCurrentSpan(pc);
+        this._stepMode = new StepInMode(span ? [span] : []);
+        this.runLoop();
+        this.sendResponse(response);
+    }
+
+    protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): void {
+        const sp = this._cpu.getRegisters().SP;
+        this._stepMode = new StepOutMode(sp);
+        this.runLoop();
+        this.sendResponse(response);
+    }
+
+    protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
+        const expression = args.expression;
+
+        // Simple variable lookup by name
+        if (this._debugInfo) {
+            const sym = this._debugInfo.symbolsByName.get(expression);
+            if (sym && sym.addr !== undefined) {
+                // Determine size
+                // If size is present, use it. Default to 1 byte.
+                // If size is 2, read word.
+                const size = sym.size || 1;
+                let val = 0;
+                let valStr = "";
+
+                if (size === 2) {
+                    val = this._memory.readWord(sym.addr);
+                    valStr = `$${val.toString(16).toUpperCase().padStart(4, '0')} (${val})`;
+                } else {
+                    val = this._memory.read(sym.addr);
+                    valStr = `$${val.toString(16).toUpperCase().padStart(2, '0')} (${val})`;
+                }
+
+                response.body = {
+                    result: valStr,
+                    variablesReference: 0
+                };
+                this.sendResponse(response);
+                return;
+            }
+        }
+
+        // If not found or no debug info
+        // We do not fail the request necessarily, but we can return null result
+        // But throwing error is standard if not evaluatable
+        this.sendErrorResponse(response, 0, `Variable ${expression} not found.`);
+    }
+
+
+
+
+
 
     private _programDir: string = "";
     private _cwd: string = "";
@@ -406,167 +658,5 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this.sendResponse(response);
     }
 
-    protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
-        // Run until trap or breakpoint
-        // Simple synchronous loop for now
-        // Ideally should be async or strict time sliced
-        // For MVP: run X instructions or until trap
 
-        // This blocks the event loop!
-        // We should use setImmediate loop
-
-        this.runLoop();
-
-        this.sendResponse(response);
-    }
-
-    private runLoop() {
-        const batch = 1000;
-        let running = true;
-
-        // If we are currently at a breakpoint, step over it first (ignoring the breakpoint)
-        if (this._cpu.breakpoints.has(this._cpu.getRegisters().PC)) {
-            // Check if it is a JSR before we step!
-            if (this._stepMode === 'over' && this._tempBreakpoint === undefined) {
-                const pc = this._cpu.getRegisters().PC;
-                const opcode = this._memory.read(pc);
-                if (opcode === 0x20) { // JSR
-                    this._tempBreakpoint = pc + 3;
-                }
-            }
-
-            const cycles = this._cpu.step(true);
-            if (cycles === 0) {
-                this.sendEvent(new StoppedEvent('pause', Bug65DebugSession.THREAD_ID));
-                return;
-            }
-        }
-
-        for (let i = 0; i < batch; i++) {
-            const pc = this._cpu.getRegisters().PC;
-
-            // Check temp breakpoint
-            if (this._tempBreakpoint !== undefined && pc === this._tempBreakpoint) {
-                // Hit our step-over return point.
-                this._tempBreakpoint = undefined;
-            }
-
-            // Execute one instruction
-            // If stepping over, and JSR, and not already waiting for return:
-            if (this._stepMode === 'over' && this._tempBreakpoint === undefined) {
-                const opcode = this._memory.read(pc);
-                if (opcode === 0x20) { // JSR
-                    this._tempBreakpoint = pc + 3;
-                }
-            }
-
-            // If we have a temp breakpoint set, we are running freely until we hit it or another BP.
-            if (this._tempBreakpoint !== undefined && pc !== this._tempBreakpoint) {
-                if (this._cpu.breakpoints.has(pc)) {
-                    this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
-                    running = false;
-                    break;
-                }
-                this._cpu.step(true);
-                continue;
-            }
-
-            // Standard step
-            const cycles = this._cpu.step(true);
-            if (cycles === 0) {
-                running = false;
-                this.sendEvent(new StoppedEvent('pause', Bug65DebugSession.THREAD_ID));
-                break;
-            }
-
-            if (this._cpu.breakpoints.has(this._cpu.getRegisters().PC)) {
-                this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
-                running = false;
-                break;
-            }
-
-            // Check Step Logic
-            if (this._stepMode === 'line' || this._stepMode === 'over') {
-                if (this._debugInfo) {
-                    const lineInfo = this._debugInfo.getLineForAddress(this._cpu.getRegisters().PC);
-                    if (lineInfo) {
-                        if (lineInfo.fileId !== this._stepStartFile || lineInfo.line !== this._stepStartLine) {
-                            this.sendEvent(new StoppedEvent('step', Bug65DebugSession.THREAD_ID));
-                            running = false;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (running) {
-            setTimeout(() => this.runLoop(), 1);
-        }
-    }
-
-    protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): void {
-        this.setupStep('over');
-        this.runLoop();
-        this.sendResponse(response);
-    }
-
-    protected stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments): void {
-        this.setupStep('line');
-        this.runLoop();
-        this.sendResponse(response);
-    }
-
-    protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
-        const expression = args.expression;
-
-        // Simple variable lookup by name
-        if (this._debugInfo) {
-            const sym = this._debugInfo.symbolsByName.get(expression);
-            if (sym && sym.addr !== undefined) {
-                // Determine size
-                // If size is present, use it. Default to 1 byte.
-                // If size is 2, read word.
-                const size = sym.size || 1;
-                let val = 0;
-                let valStr = "";
-
-                if (size === 2) {
-                    val = this._memory.readWord(sym.addr);
-                    valStr = `$${val.toString(16).toUpperCase().padStart(4, '0')} (${val})`;
-                } else {
-                    val = this._memory.read(sym.addr);
-                    valStr = `$${val.toString(16).toUpperCase().padStart(2, '0')} (${val})`;
-                }
-
-                response.body = {
-                    result: valStr,
-                    variablesReference: 0
-                };
-                this.sendResponse(response);
-                return;
-            }
-        }
-
-        // If not found or no debug info
-        // We do not fail the request necessarily, but we can return null result
-        // But throwing error is standard if not evaluatable
-        this.sendErrorResponse(response, 0, `Variable ${expression} not found.`);
-    }
-
-    private setupStep(mode: 'line' | 'over') {
-        const pc = this._cpu.getRegisters().PC;
-        this._stepMode = mode;
-        this._stepStartFile = -1;
-        this._stepStartLine = -1;
-        this._tempBreakpoint = undefined;
-
-        if (this._debugInfo) {
-            const lineInfo = this._debugInfo.getLineForAddress(pc);
-            if (lineInfo) {
-                this._stepStartFile = lineInfo.fileId;
-                this._stepStartLine = lineInfo.line;
-            }
-        }
-    }
 }
