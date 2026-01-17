@@ -229,7 +229,22 @@ export class Bug65DebugSession extends LoggingDebugSession {
         const startFrame = args.startFrame || 0;
         const maxLevels = args.levels || 20;
 
+        const { frames } = this.scanStack(maxLevels + startFrame);
+
+        // Slice requested frames
+        const totalFrames = frames.length;
+        const sentFrames = frames.slice(startFrame, startFrame + maxLevels);
+
+        response.body = {
+            stackFrames: sentFrames,
+            totalFrames: totalFrames
+        };
+        this.sendResponse(response);
+    }
+
+    private scanStack(maxFrames: number): { frames: StackFrame[], usedAddresses: Set<number> } {
         const stackFrames = new Array<StackFrame>();
+        const usedAddresses = new Set<number>();
         const pc = this._cpu.getRegisters().PC;
         const sp = this._cpu.getRegisters().SP;
 
@@ -244,7 +259,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
         let stackPtr = sp + 1;
         let frameId = 1;
 
-        while (stackPtr < 0xFE && stackFrames.length < (maxLevels + startFrame)) {
+        while (stackPtr < 0xFE && stackFrames.length < maxFrames) {
             // Check for potential return address (2 bytes)
             // Stack is in page 1 (0x100 - 0x1FF)
             const low = this._memory.read(0x100 + stackPtr);
@@ -263,22 +278,15 @@ export class Bug65DebugSession extends LoggingDebugSession {
                 if (opcode === 0x20) {
                     const added = this.addStackFrame(stackFrames, jsrAddr, frameId);
                     if (added) {
+                        usedAddresses.add(0x100 + stackPtr);
+                        usedAddresses.add(0x100 + stackPtr + 1);
                         frameId++;
                     }
                 }
             }
             stackPtr++;
         }
-
-        // Slice requested frames
-        const totalFrames = stackFrames.length;
-        const sentFrames = stackFrames.slice(startFrame, startFrame + maxLevels);
-
-        response.body = {
-            stackFrames: sentFrames,
-            totalFrames: totalFrames
-        };
-        this.sendResponse(response);
+        return { frames: stackFrames, usedAddresses };
     }
 
     private addStackFrame(frames: StackFrame[], addr: number, id: number): boolean {
@@ -371,6 +379,25 @@ export class Bug65DebugSession extends LoggingDebugSession {
                 value: `$${regs.Status.toString(16).toUpperCase()}`,
                 variablesReference: 0
             });
+        } else if (id === "stack") {
+            const sp = this._cpu.getRegisters().SP;
+
+            // Scan stack to identify return addresses
+            const { usedAddresses } = this.scanStack(100);
+
+            // Iterate 0x100 range from SP+1
+            for (let ptr = sp + 1; ptr <= 0xFF; ptr++) {
+                const addr = 0x100 + ptr;
+                if (!usedAddresses.has(addr)) {
+                    const val = this._memory.read(addr);
+                    variables.push({
+                        name: `$${addr.toString(16).toUpperCase()}`,
+                        type: "integer",
+                        value: `$${val.toString(16).toUpperCase()}`,
+                        variablesReference: 0
+                    });
+                }
+            }
         }
 
         response.body = {

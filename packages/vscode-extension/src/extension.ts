@@ -5,7 +5,7 @@ import { Bug65DebugSession } from './bug65Debug';
 console.log('[Bug65] Extension module loading...');
 
 export function activate(context: vscode.ExtensionContext) {
-    try { 
+    try {
         console.log('[Bug65] Activating extension "vscode-bug65-debugger"...');
         console.log(hello());
 
