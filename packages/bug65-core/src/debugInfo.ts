@@ -142,7 +142,7 @@ export class DebugInfoParser {
         const lines = content.split(/\r?\n/);
 
         // Store items to process after first pass
-        const rawLines: { fileId: number, lineNum: number, spanId?: number, type?: number }[] = [];
+        const rawLines: { fileId: number, lineNum: number, spanIds?: number[], type?: number }[] = [];
 
         for (const lineStr of lines) {
             if (!lineStr.trim()) continue;
@@ -228,14 +228,12 @@ export class DebugInfoParser {
                         const lineNum = parseInt(props.get('line')!);
                         const type = props.has('type') ? parseInt(props.get('type')!) : undefined;
                         const spanIdStr = props.get('span');
-                        let spanId: number | undefined;
+                        let spanIds: number[] | undefined;
                         if (spanIdStr) {
-                            const plusIdx = spanIdStr.indexOf('+');
-                            if (plusIdx !== -1) spanId = parseInt(spanIdStr.substring(0, plusIdx));
-                            else spanId = parseInt(spanIdStr);
+                            spanIds = spanIdStr.split('+').map(s => parseInt(s));
                         }
 
-                        rawLines.push({ fileId, lineNum, spanId, type });
+                        rawLines.push({ fileId, lineNum, spanIds, type });
                     }
                     break;
             }
@@ -243,10 +241,15 @@ export class DebugInfoParser {
 
         // Second pass: Process lines now that spans are loaded
         for (const l of rawLines) {
-            const lInfo: LineInfo = { fileId: l.fileId, line: l.lineNum, spanId: l.spanId, type: l.type };
-            info.lines.push(lInfo);
-            if (l.spanId !== undefined) {
-                info.addLineMapping(l.spanId, lInfo);
+            if (l.spanIds && l.spanIds.length > 0) {
+                for (const sid of l.spanIds) {
+                    const lInfo: LineInfo = { fileId: l.fileId, line: l.lineNum, spanId: sid, type: l.type };
+                    info.lines.push(lInfo);
+                    info.addLineMapping(sid, lInfo);
+                }
+            } else {
+                // Line without span? Just record it.
+                info.lines.push({ fileId: l.fileId, line: l.lineNum, type: l.type, spanId: undefined });
             }
         }
 
