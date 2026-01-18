@@ -14,6 +14,7 @@ interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
     program: string;
     stopOnEntry?: boolean;
     cpu?: string;
+    args?: string[];
 }
 
 interface StepMode {
@@ -338,6 +339,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
         // Configure Host for this run
         this._host.setSpAddress(spAddr);
+        this._host.commandLineArgs = [programPath, ...(args.args || [])];
 
 
 

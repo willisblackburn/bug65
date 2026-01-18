@@ -17,7 +17,9 @@ function main() {
     let specifiedCpuType: CpuType | null = null;
 
     // Parse args
+    // Parse args
     let dbgFileArg: string | null = null;
+    let guestArgs: string[] = [];
 
     // Parse args
     for (let i = 0; i < args.length; i++) {
@@ -53,7 +55,34 @@ function main() {
             }
         } else if (!programPath) {
             programPath = args[i];
+
+            // Check if next arg is a number (load addr) or just args
+            // If we have a program path, and the next arg looks like a hex number, treat as load addr
+            // Otherwise, everything else is guest args
+            if (i + 1 < args.length) {
+                const nextArg = args[i + 1];
+                // Heuristic: if it looks like a hex address (3-4 chars, hex), assume load addr, unless we already have one
+                // But strictly, usage says [start_address_hex] is optional.
+                // It is ambiguous if the guest program takes an argument that looks like a hex number.
+                // Let's stick to strict parsing: if it parses as hex, it is load addr?
+                // Or maybe we treat everything after programPath as guest args, UNLESS there are no args yet?
+                // Actually usage says: <program.bin> [start_address_hex]
+                // So subsequent args are problematic if they exist.
+                // We should change usage to: bug65 [options] <program.bin> [start_address_hex] [--] [guest_args...]
+                // OR: just take everything after program.bin (and optional addr) as guest args.
+
+                // Let's see if the next arg is a load address
+                if (/^[0-9A-Fa-f]{3,4}$/.test(nextArg) && specifiedLoadAddr === null) {
+                    specifiedLoadAddr = parseInt(nextArg, 16);
+                    i++; // consume it
+                }
+
+                // All remaining args are guest args
+                guestArgs = args.slice(i + 1);
+                break; // Stop parsing host args
+            }
         } else if (specifiedLoadAddr === null) {
+            // This branch shouldn't be reached due to the break above, but for safety
             specifiedLoadAddr = parseInt(args[i], 16);
         }
     }
@@ -105,6 +134,7 @@ function main() {
         // Initializing host
         const host = new Bug65Host(cpu, memory);
         host.setSpAddress(spAddr);
+        host.commandLineArgs = [programPath, ...guestArgs];
 
 
         host.onExit = (code) => {

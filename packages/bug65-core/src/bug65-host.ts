@@ -87,6 +87,7 @@ export class Bug65Host {
     private memory: IMemory;
     public onExit: ((code: number) => void) | undefined;
     public onWrite: ((val: number) => void) | undefined;
+    public commandLineArgs: string[] = ["bug65"];
     private spAddress: number = 0x00; // Default to $00 (cc65 default)
 
     private fds: Map<number, IOStrategy> = new Map();
@@ -137,6 +138,24 @@ export class Bug65Host {
         this.cpu.setRegisters(regs);
     }
 
+
+    // Push buffer to software stack (sim65 convention, descending stack)
+    // Returns the address where data was written (new SP)
+    private pushBuffer(data: Uint8Array): number {
+        const spZp = this.spAddress;
+        let sp = (this.memory.read(spZp + 1) << 8) | this.memory.read(spZp);
+
+        sp = (sp - data.length) & 0xFFFF;
+
+        for (let i = 0; i < data.length; i++) {
+            this.memory.write(sp + i, data[i]);
+        }
+
+        this.memory.write(spZp, sp & 0xFF);
+        this.memory.write(spZp + 1, (sp >> 8) & 0xFF);
+        return sp;
+    }
+
     // Pop param from software stack (sim65 convention)
     private popParam(bytes: number): number {
         const spZp = this.spAddress;
@@ -173,7 +192,10 @@ export class Bug65Host {
                 case this.ADDR_WRITE: this.pvWrite(); break;
                 case this.ADDR_LSEEK: this.pvLseek(); break;
                 case this.ADDR_REMOVE: this.pvRemove(); break;
-                // case this.ADDR_MAPERRNO: this.pvMapErrno(); break;
+                case this.ADDR_LSEEK: this.pvLseek(); break;
+                case this.ADDR_REMOVE: this.pvRemove(); break;
+                case this.ADDR_MAPERRNO: this.pvMapErrno(); break;
+                case this.ADDR_ARGS: this.pvArgs(); break;
                 default:
                     // Not handled, return false? Or throw?
                     return false;
@@ -316,5 +338,48 @@ export class Bug65Host {
         } catch (e) {
             this.setAX(0xFFFF);
         }
+    }
+
+    private pvMapErrno() {
+        // Trivial implementation: always return 0 (no error) for now
+        this.setAX(0);
+    }
+
+    private pvArgs() {
+        const argvPtrAddr = this.getAX(); // Address of __argv variable
+        const args = this.commandLineArgs;
+        const argc = args.length;
+
+        // 1. Push strings
+        const stringAddrs: number[] = [];
+        for (const arg of args) {
+            const bytes = new Uint8Array(arg.length + 1);
+            for (let i = 0; i < arg.length; i++) {
+                bytes[i] = arg.charCodeAt(i);
+            }
+            bytes[arg.length] = 0; // Null terminator
+            stringAddrs.push(this.pushBuffer(bytes));
+        }
+
+        // 2. Push pointers (argv array)
+        // Push NULL first (argv[argc])
+        this.pushBuffer(new Uint8Array([0, 0]));
+
+        // Push in reverse order so argv[0] is at lowest address (top of stack)
+        for (let i = argc - 1; i >= 0; i--) {
+            const addr = stringAddrs[i];
+            this.pushBuffer(new Uint8Array([addr & 0xFF, (addr >> 8) & 0xFF]));
+        }
+
+        // Current SP is argv
+        const spZp = this.spAddress;
+        const argvAddr = (this.memory.read(spZp + 1) << 8) | this.memory.read(spZp);
+
+        // 3. Write argv to __argv
+        this.memory.write(argvPtrAddr, argvAddr & 0xFF);
+        this.memory.write(argvPtrAddr + 1, (argvAddr >> 8) & 0xFF);
+
+        // 4. Return argc
+        this.setAX(argc);
     }
 }
