@@ -1,5 +1,6 @@
 
 import * as fs from 'fs';
+import { upperBound } from './utils';
 
 export interface SourceFile {
     id: number;
@@ -22,6 +23,7 @@ export interface SpanInfo {
     start: number;
     size: number;
     type?: number;
+    absStart?: number; // Calculated absolute start address
 }
 
 export interface SymbolInfo {
@@ -68,7 +70,10 @@ export class DebugInfo {
     // Derived map: fileId -> isLibrary
     public fileIsLibrary: Map<number, boolean> = new Map();
 
-    private addressToLine: Map<number, LineInfo[]> = new Map();
+    // Optimized lookups
+    public sortedSpans: SpanInfo[] = [];
+    private spanToLines: Map<number, LineInfo[]> = new Map();
+
     private addressToSymbol: Map<number, SymbolInfo> = new Map();
 
     public addSymbol(sym: SymbolInfo) {
@@ -94,8 +99,9 @@ export class DebugInfo {
     }
 
     // Return the "best" line for an address (backward compatibility)
+    // Return the "best" line for an address (backward compatibility)
     public getLineForAddress(addr: number): LineInfo | undefined {
-        const lines = this.addressToLine.get(addr);
+        const lines = this.getAllLinesForAddress(addr);
         if (!lines || lines.length === 0) return undefined;
 
         // Heuristic: Prefer type=1 (C/High-level)
@@ -104,25 +110,29 @@ export class DebugInfo {
     }
 
     public getAllLinesForAddress(addr: number): LineInfo[] {
-        return this.addressToLine.get(addr) || [];
+        // Find span containing addr
+        // 1. Find the first span that starts AFTER addr
+        const idx = upperBound(this.sortedSpans, addr, s => s.absStart!);
+
+        // 2. The potential candidate is the one immediately before (starts <= addr)
+        if (idx > 0) {
+            const candidate = this.sortedSpans[idx - 1];
+            if (candidate.absStart! <= addr && addr < (candidate.absStart! + candidate.size)) {
+                return this.spanToLines.get(candidate.id) || [];
+            }
+        }
+        return [];
     }
 
     public addLineMapping(spanId: number, lineInfo: LineInfo) {
-        const span = this.spans.get(spanId);
-        if (span) {
-            const segStart = this.segments.get(span.segId)?.start || 0;
-            for (let i = 0; i < span.size; i++) {
-                const addr = segStart + span.start + i;
-                let list = this.addressToLine.get(addr);
-                if (!list) {
-                    list = [];
-                    this.addressToLine.set(addr, list);
-                }
-                // Avoid duplicates
-                if (!list.some(existing => existing.fileId === lineInfo.fileId && existing.line === lineInfo.line)) {
-                    list.push(lineInfo);
-                }
-            }
+        let list = this.spanToLines.get(spanId);
+        if (!list) {
+            list = [];
+            this.spanToLines.set(spanId, list);
+        }
+        // Avoid duplicates
+        if (!list.some(existing => existing.fileId === lineInfo.fileId && existing.line === lineInfo.line)) {
+            list.push(lineInfo);
         }
     }
 
@@ -133,6 +143,17 @@ export class DebugInfo {
                 this.fileIsLibrary.set(mod.fileId, true);
             }
         }
+
+        // Build sorted spans
+        this.sortedSpans = [];
+        for (const span of this.spans.values()) {
+            const seg = this.segments.get(span.segId);
+            if (seg) {
+                span.absStart = seg.start + span.start;
+                this.sortedSpans.push(span);
+            }
+        }
+        this.sortedSpans.sort((a, b) => (a.absStart || 0) - (b.absStart || 0));
     }
 }
 
