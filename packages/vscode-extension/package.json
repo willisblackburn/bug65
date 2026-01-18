@@ -80,7 +80,8 @@
     "scripts": {
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -b",
-        "watch": "tsc -b -w"
+        "watch": "tsc -b -w",
+        "test": "echo \"No tests specified\" && exit 0"
     },
     "devDependencies": {
         "typescript": "^5.0.0",

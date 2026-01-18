@@ -1,6 +1,7 @@
 
 import * as fs from 'fs';
-import { upperBound } from './utils';
+
+import IntervalTree from 'node-interval-tree';
 
 export interface SourceFile {
     id: number;
@@ -67,11 +68,15 @@ export class DebugInfo {
     public modules: Map<number, ModuleInfo> = new Map();
     public libraries: Map<number, LibraryInfo> = new Map();
 
+
+
+    // Derived map: fileId -> isLibrary
+
     // Derived map: fileId -> isLibrary
     public fileIsLibrary: Map<number, boolean> = new Map();
 
     // Optimized lookups
-    public sortedSpans: SpanInfo[] = [];
+    public spanTree = new IntervalTree<SpanInfo>();
     private spanToLines: Map<number, LineInfo[]> = new Map();
 
     private addressToSymbol: Map<number, SymbolInfo> = new Map();
@@ -99,7 +104,6 @@ export class DebugInfo {
     }
 
     // Return the "best" line for an address (backward compatibility)
-    // Return the "best" line for an address (backward compatibility)
     public getLineForAddress(addr: number): LineInfo | undefined {
         const lines = this.getAllLinesForAddress(addr);
         if (!lines || lines.length === 0) return undefined;
@@ -110,18 +114,20 @@ export class DebugInfo {
     }
 
     public getAllLinesForAddress(addr: number): LineInfo[] {
-        // Find span containing addr
-        // 1. Find the first span that starts AFTER addr
-        const idx = upperBound(this.sortedSpans, addr, s => s.absStart!);
+        // Find spans containing addr
+        const candidateSpans = this.spanTree.search(addr, addr);
 
-        // 2. The potential candidate is the one immediately before (starts <= addr)
-        if (idx > 0) {
-            const candidate = this.sortedSpans[idx - 1];
-            if (candidate.absStart! <= addr && addr < (candidate.absStart! + candidate.size)) {
-                return this.spanToLines.get(candidate.id) || [];
+        // Heuristic: Sort candidates by size (ascending) to prefer smaller (more specific) spans.
+        candidateSpans.sort((a, b) => a.size - b.size);
+
+        const results: LineInfo[] = [];
+        for (const span of candidateSpans) {
+            const lines = this.spanToLines.get(span.id);
+            if (lines) {
+                results.push(...lines);
             }
         }
-        return [];
+        return results;
     }
 
     public addLineMapping(spanId: number, lineInfo: LineInfo) {
@@ -144,16 +150,14 @@ export class DebugInfo {
             }
         }
 
-        // Build sorted spans
-        this.sortedSpans = [];
+        // Build interval tree
         for (const span of this.spans.values()) {
             const seg = this.segments.get(span.segId);
             if (seg) {
                 span.absStart = seg.start + span.start;
-                this.sortedSpans.push(span);
+                this.spanTree.insert(span.absStart, span.absStart + span.size - 1, span);
             }
         }
-        this.sortedSpans.sort((a, b) => (a.absStart || 0) - (b.absStart || 0));
     }
 }
 

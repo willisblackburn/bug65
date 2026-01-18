@@ -4,11 +4,14 @@
     "main": "out/src/index.js",
     "types": "out/src/index.d.ts",
     "scripts": {
-        "test": "ts-node test/repro_crash.ts",
+        "test": "npx ts-node test/repro_crash.ts && npx ts-node test/pv_args_test.ts && npx ts-node test/debugInfo_parser_test.ts && npx ts-node test/debugInfo_lookup_test.ts && npx ts-node test/debugInfo_overlap_test.ts",
         "compile": "tsc -b"
     },
     "devDependencies": {
-        "typescript": "^5.0.0",
-        "@types/node": "^18.0.0"
+        "@types/node": "^18.0.0",
+        "typescript": "^5.0.0"
+    },
+    "dependencies": {
+        "node-interval-tree": "^2.1.2"
     }
 }
