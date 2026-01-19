@@ -33,7 +33,7 @@
             {
                 "type": "bug65",
                 "label": "bug65 Debugger",
-                "program": "./out/debugAdapter.js",
+                "program": "./out/debug_adapter.js",
                 "runtime": "node",
                 "configurationAttributes": {
                     "launch": {
