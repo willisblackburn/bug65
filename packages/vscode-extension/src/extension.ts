@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { hello } from 'bug65-core';
-import { Bug65DebugSession } from './bug65Debug';
+import { Bug65DebugSession } from './bug65_debug';
 
 console.log('[Bug65] Extension module loading...');
 

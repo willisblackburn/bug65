@@ -1,31 +1,19 @@
-
-import { VariableResolver, CSymbolInfo, TypeInfo } from '../src/debugInfo';
+import { VariableResolver, CSymbolInfo, TypeInfo } from '../src/debug_info';
+import { SimpleMemory } from '../src/memory';
 import * as assert from 'assert';
 
 console.log("Running VariableResolver Test...");
 
-const mem = {
-    data: new Uint8Array(65536),
-    fill(addr: number, val: number) {
-        this.data[addr] = val;
-    },
-    read(addr: number) {
-        return this.data[addr];
-    },
-    readWord(addr: number) {
-        return this.data[addr] | (this.data[addr + 1] << 8);
-    }
-};
+const mem = new SimpleMemory();
 
 const sp = 0x1000;
 
-mem.data.fill(0);
 
 // Char Test
 {
     const sym: CSymbolInfo = { id: 1, name: 'c', scopeId: 1, typeId: 1, sc: 'auto', offset: 0 };
     const type: TypeInfo = { id: 1, size: 1, kind: '04' };
-    mem.fill(sp, 65); // 'A'
+    mem.write(sp, 65); // 'A'
     const res = VariableResolver.resolveValue(mem, sp, sym, 0, type);
     assert.strictEqual(res.type, 'char');
     assert.ok(res.str.includes("'A'"));
@@ -36,8 +24,8 @@ mem.data.fill(0);
 {
     const sym: CSymbolInfo = { id: 2, name: 'i', scopeId: 1, typeId: 2, sc: 'auto', offset: 2 };
     const type: TypeInfo = { id: 2, size: 2, kind: '05' };
-    mem.fill(sp + 2, 0x39);
-    mem.fill(sp + 3, 0x05); // 0x0539 = 1337
+    mem.write(sp + 2, 0x39);
+    mem.write(sp + 3, 0x05); // 0x0539 = 1337
     const res = VariableResolver.resolveValue(mem, sp, sym, 0, type);
     assert.strictEqual(res.type, 'int');
     assert.ok(res.str.includes("1337"));
@@ -48,8 +36,8 @@ mem.data.fill(0);
 {
     const sym: CSymbolInfo = { id: 4, name: 'ptr', scopeId: 1, typeId: 3, sc: 'auto', offset: 6 };
     const type: TypeInfo = { id: 3, size: 2, kind: '80' }; // Pointer
-    mem.fill(sp + 6, 0x00);
-    mem.fill(sp + 7, 0x20); // 0x2000
+    mem.write(sp + 6, 0x00);
+    mem.write(sp + 7, 0x20); // 0x2000
     const res = VariableResolver.resolveValue(mem, sp, sym, 0, type);
     assert.strictEqual(res.type, 'ptr');
     assert.strictEqual(res.str, '$2000');

@@ -8,7 +8,7 @@ import {
     Thread, Scope, Source, Handles, Breakpoint, StackFrame
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { Cpu6502, Memory, CpuRegisters, Bug65Host, DebugInfo, DebugInfoParser, Disassembler6502, ProgramLoader, CpuType, VariableResolver, TypeInfo } from 'bug65-core';
+import { Cpu6502, Memory, SimpleMemory, CpuRegisters, Bug65Host, DebugInfo, DebugInfoParser, Disassembler6502, ProgramLoader, CpuType, VariableResolver, TypeInfo } from 'bug65-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -165,7 +165,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
     constructor() {
         super("bug65-debug.txt");
 
-        this._memory = new Memory();
+        this._memory = new SimpleMemory();
         this._cpu = new Cpu6502(this._memory);
         this._disassembler = new Disassembler6502();
         this._host = new Bug65Host(this._cpu, this._memory);

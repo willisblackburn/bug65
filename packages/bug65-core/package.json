@@ -4,7 +4,7 @@
     "main": "out/src/index.js",
     "types": "out/src/index.d.ts",
     "scripts": {
-        "test": "npx ts-node test/repro_crash.ts && npx ts-node test/pv_args_test.ts && npx ts-node test/debugInfo_parser_test.ts && npx ts-node test/debugInfo_lookup_test.ts && npx ts-node test/debugInfo_overlap_test.ts && npx ts-node test/variable_resolver_test.ts && npx ts-node test/verification_args_test.ts",
+        "test": "npx ts-node test/repro_crash.ts && npx ts-node test/pv_args_test.ts && npx ts-node test/debug_info_parser_test.ts && npx ts-node test/debug_info_lookup_test.ts && npx ts-node test/debug_info_overlap_test.ts && npx ts-node test/variable_resolver_test.ts && npx ts-node test/verification_args_test.ts",
         "compile": "tsc -b"
     },
     "devDependencies": {

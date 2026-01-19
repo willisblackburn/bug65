@@ -1,5 +1,5 @@
 
-import { CpuType } from './cpu-interface';
+import { CpuType } from './cpu_interface';
 
 export enum Opcode {
     BRK_imp = 0x00,

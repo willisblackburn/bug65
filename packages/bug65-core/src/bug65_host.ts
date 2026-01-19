@@ -1,5 +1,6 @@
-import { Cpu6502 } from './cpu6502';
-import { IMemory } from './memory';
+import { Cpu6502 } from './cpu_6502';
+import { Cpu } from './cpu_interface';
+import { Memory } from './memory';
 import * as fs from 'fs';
 import { constants } from 'fs';
 
@@ -98,7 +99,8 @@ class FileStrategy implements IOStrategy {
 
 export class Bug65Host {
     private cpu: Cpu6502;
-    private memory: IMemory;
+
+    private memory: Memory;
     public onExit: ((code: number) => void) | undefined;
     public onWrite: ((val: number) => void) | undefined;
 
@@ -123,7 +125,7 @@ export class Bug65Host {
     private readonly ADDR_ARGS = 0xFFF8;
     private readonly ADDR_EXIT = 0xFFF9;
 
-    constructor(cpu: Cpu6502, memory: IMemory) {
+    constructor(cpu: Cpu6502, memory: Memory) {
         if (cpu.onTrap) {
             throw new Error("CPU onTrap handler is already set.");
         }

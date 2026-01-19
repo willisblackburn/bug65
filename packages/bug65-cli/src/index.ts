@@ -1,5 +1,5 @@
 
-import { Cpu6502, Memory, Flags, Bug65Host, Disassembler6502, DebugInfo, DebugInfoParser, ProgramLoader, CpuType } from 'bug65-core';
+import { Cpu6502, Memory, SimpleMemory, Flags, Bug65Host, Disassembler6502, DebugInfo, DebugInfoParser, ProgramLoader, CpuType } from 'bug65-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -107,7 +107,7 @@ function main() {
         const data = fs.readFileSync(programPath);
         console.error("File read size:", data.length);
 
-        memory = new Memory();
+        memory = new SimpleMemory();
         cpu = new Cpu6502(memory);
 
         // Header check for 'sim65'

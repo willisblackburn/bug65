@@ -1,6 +1,6 @@
 
-import { IMemory } from './memory';
-import { CpuType } from './cpu-interface';
+import { Memory } from './memory';
+import { CpuType } from './cpu_interface';
 
 export interface ProgramLoadResult {
     loadAddr: number;
@@ -11,7 +11,7 @@ export interface ProgramLoadResult {
 }
 
 export namespace ProgramLoader {
-    export function load(memory: IMemory, data: Buffer | Uint8Array, options?: { loadAddr?: number }): ProgramLoadResult {
+    export function load(memory: Memory, data: Buffer | Uint8Array, options?: { loadAddr?: number }): ProgramLoadResult {
         // Check for sim65 header
         // Header: "sim65" (5 bytes)
         // Version: 1 byte (offset 5)

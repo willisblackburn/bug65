@@ -1,8 +1,8 @@
-import { IMemory } from './memory';
+import { Memory } from './memory';
 
 export type CpuType = '6502' | '65C02';
 
-export interface ICpu {
+export interface Cpu {
     reset(): void;
     step(): number; // Returns cycles taken
     getRegisters(): CpuRegisters;

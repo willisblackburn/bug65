@@ -1,5 +1,5 @@
 
-import { DebugInfoParser } from '../src/debugInfo';
+import { DebugInfoParser } from '../src/debug_info';
 import * as assert from 'assert';
 
 console.log("Running DebugInfo Parser Test...");

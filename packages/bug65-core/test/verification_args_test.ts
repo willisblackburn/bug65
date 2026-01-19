@@ -1,7 +1,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { DebugInfoParser } from '../src/debugInfo';
+import { DebugInfoParser } from '../src/debug_info';
 
 const dbgPath = path.join(__dirname, 'data', 'args.dbg');
 if (!fs.existsSync(dbgPath)) {

@@ -1,4 +1,4 @@
-export interface IMemory {
+export interface Memory {
     read(address: number): number;
     write(address: number, value: number): void;
     load(address: number, data: Uint8Array): void;
@@ -6,7 +6,7 @@ export interface IMemory {
     writeWord(address: number, value: number): void;
 }
 
-export class Memory implements IMemory {
+export class SimpleMemory implements Memory {
     private data: Uint8Array;
 
     constructor(size: number = 65536) {

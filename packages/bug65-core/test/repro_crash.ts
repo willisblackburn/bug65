@@ -1,11 +1,11 @@
 
-import { Memory } from './../src/memory';
-import { Cpu6502 } from './../src/cpu6502';
+import { SimpleMemory } from './../src/memory';
+import { Cpu6502 } from './../src/cpu_6502';
 import * as assert from 'assert';
 
 function testJsrRtsJmp() {
     console.log("Testing JSR / RTS / JMP flow...");
-    const memory = new Memory();
+    const memory = new SimpleMemory();
     const cpu = new Cpu6502(memory);
 
     // Setup Scenario
@@ -78,7 +78,7 @@ function testCrashScenario() {
     // We mock JSR target $4060 to just RTS.
 
     console.log("Testing Crash Scenario...");
-    const memory = new Memory();
+    const memory = new SimpleMemory();
     const cpu = new Cpu6502(memory);
 
     const base = 0x3D51;

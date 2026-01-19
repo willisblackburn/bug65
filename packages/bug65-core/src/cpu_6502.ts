@@ -1,9 +1,9 @@
-import { ICpu, CpuRegisters, Flags, CpuType } from './cpu-interface';
-import { IMemory } from './memory';
+import { Cpu, CpuRegisters, Flags, CpuType } from './cpu_interface';
+import { Memory } from './memory';
 import { OPCODES, Opcode } from './opcodes';
 
-export class Cpu6502 implements ICpu {
-    protected memory: IMemory;
+export class Cpu6502 implements Cpu {
+    protected memory: Memory;
 
     protected A: number = 0;
     protected X: number = 0;
@@ -18,7 +18,7 @@ export class Cpu6502 implements ICpu {
     public breakpoints: Map<number, Set<string>> = new Map();
     private _cpuType: CpuType = '6502';
 
-    constructor(memory: IMemory, cpuType: CpuType = '6502') {
+    constructor(memory: Memory, cpuType: CpuType = '6502') {
         this.memory = memory;
         this._cpuType = cpuType;
     }

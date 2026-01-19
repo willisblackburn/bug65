@@ -1,5 +1,5 @@
 
-import { DebugInfoParser, VariableResolver, Memory } from '../src';
+import { DebugInfoParser, VariableResolver, SimpleMemory } from '../src';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as assert from 'assert';
@@ -69,7 +69,7 @@ console.log(`PASS: Found variable 'local_var' offset=${locVar.offset}.`);
 // Stack Pointer (SP) points to top of stack.
 // 'local_var' has offset -2.
 // If SP is $1000, variable is at $0FFE.
-const mem = new Memory();
+const mem = new SimpleMemory();
 const sp = 0x1000;
 const varAddr = (sp + locVar.offset) & 0xFFFF; // 0x0FFE
 

@@ -1,10 +1,10 @@
 
-import { Memory } from './../src/memory';
-import { Cpu6502 } from './../src/cpu6502';
+import { SimpleMemory } from './../src/memory';
+import { Cpu6502 } from './../src/cpu_6502';
 import * as assert from 'assert';
 
 function testLDAImmediate() {
-    const memory = new Memory();
+    const memory = new SimpleMemory();
     const cpu = new Cpu6502(memory);
 
     // LDA #$55
@@ -22,7 +22,7 @@ function testLDAImmediate() {
 }
 
 function testParavirtualizationTraps() {
-    const memory = new Memory();
+    const memory = new SimpleMemory();
     const cpu = new Cpu6502(memory);
 
     // Setup reset vector

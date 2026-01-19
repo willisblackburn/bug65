@@ -1,11 +1,11 @@
 
-import { Memory } from './../src/memory';
-import { Cpu6502 } from './../src/cpu6502';
-import { Flags } from './../src/cpu-interface';
+import { SimpleMemory } from './../src/memory';
+import { Cpu6502 } from './../src/cpu_6502';
+import { Flags } from './../src/cpu_interface';
 import * as assert from 'assert';
 
 function testADC() {
-    const memory = new Memory();
+    const memory = new SimpleMemory();
     const cpu = new Cpu6502(memory); // Access protected members with casting if needed? No, use public API
 
     // Test: 10 + 20 = 30
@@ -24,7 +24,7 @@ function testADC() {
 }
 
 function testADCCarry() {
-    const memory = new Memory();
+    const memory = new SimpleMemory();
     const cpu = new Cpu6502(memory);
 
     // Test: 250 + 10 = 260 (4 in A, Carry Set)
@@ -50,7 +50,7 @@ function testADCCarry() {
 }
 
 function testBranch() {
-    const memory = new Memory();
+    const memory = new SimpleMemory();
     const cpu = new Cpu6502(memory);
 
     // Loop X from 5 down to 0
@@ -88,7 +88,7 @@ function testBranch() {
 }
 
 function testStack() {
-    const memory = new Memory();
+    const memory = new SimpleMemory();
     const cpu = new Cpu6502(memory);
 
     // LDA #$AA

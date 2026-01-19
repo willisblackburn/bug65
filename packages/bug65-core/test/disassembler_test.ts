@@ -1,10 +1,10 @@
 
 import * as assert from 'assert';
-import { Disassembler6502 } from '../src/disassembler6502';
-import { Memory } from '../src/memory';
+import { Disassembler6502 } from '../src/disassembler_6502';
+import { SimpleMemory } from '../src/memory';
 
 async function runTest() {
-    const mem = new Memory();
+    const mem = new SimpleMemory();
     const disasm = new Disassembler6502();
 
     // Test 1: LDA #$12 (A9 12)

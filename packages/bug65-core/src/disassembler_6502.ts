@@ -1,6 +1,6 @@
-import { IMemory } from './memory';
-import { DebugInfo } from './debugInfo';
-import { CpuType } from './cpu-interface';
+import { Memory } from './memory';
+import { DebugInfo } from './debug_info';
+import { CpuType } from './cpu_interface';
 import { OPCODES, OpcodeInfo } from './opcodes';
 
 export class Disassembler6502 {
@@ -16,7 +16,7 @@ export class Disassembler6502 {
         this.cpuType = type;
     }
 
-    public disassemble(memory: IMemory, pc: number): { asm: string, bytes: number[], count: number } {
+    public disassemble(memory: Memory, pc: number): { asm: string, bytes: number[], count: number } {
         const opcode = memory.read(pc);
         const entry = OPCODES[opcode];
 

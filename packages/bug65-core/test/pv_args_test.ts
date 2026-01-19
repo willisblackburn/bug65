@@ -1,8 +1,8 @@
-import { Bug65Host } from '../src/bug65-host';
-import { Cpu6502 } from '../src/cpu6502';
-import { Memory } from '../src/memory';
+import { Bug65Host } from '../src/bug65_host';
+import { Cpu6502 } from '../src/cpu_6502';
+import { SimpleMemory } from '../src/memory';
 
-const memory = new Memory();
+const memory = new SimpleMemory();
 const cpu = new Cpu6502(memory);
 const host = new Bug65Host(cpu, memory);
 
