@@ -110,7 +110,6 @@ class StepOutMode implements StepMode {
     }
 }
 
-
 // Manager to reuse terminals
 class TerminalManager {
     private static terminals = new Map<string, { terminal: vscode.Terminal, pty: Bug65Terminal }>();
@@ -176,7 +175,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
         };
 
         this._host.onExit = (code) => {
-            this.sendEvent(new OutputEvent(`[Bug65] Program exited with code ${code}\n`, 'console'));
+            this.sendEvent(new OutputEvent(`[bug65] Program exited with code ${code}\n`, 'console'));
             this.sendEvent(new TerminatedEvent());
         };
     }
@@ -341,17 +340,12 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this.sendErrorResponse(response, 0, `Variable ${expression} not found.`);
     }
 
-
-
-
-
-
     private _programDir: string = "";
     private _cwd: string = "";
 
     protected async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments) {
         logger.setup(Logger.LogLevel.Verbose, false);
-        this.sendEvent(new OutputEvent(`[Bug65] Launching program: ${args.program}\n`, 'console'));
+        this.sendEvent(new OutputEvent(`[bug65] Launching program: ${args.program}\n`, 'console'));
 
         const programPath = args.program;
         this._programDir = path.dirname(programPath);
@@ -362,7 +356,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
         const cwd = (args as any).cwd || this._programDir;
         this._cwd = cwd;
 
-        this.sendEvent(new OutputEvent(`[Bug65] CWD: ${this._cwd}\n`, 'console'));
+        this.sendEvent(new OutputEvent(`[bug65] CWD: ${this._cwd}\n`, 'console'));
 
         if (!fs.existsSync(programPath)) {
             this.sendErrorResponse(response, 0, `Program file ${programPath} not found.`);
@@ -383,11 +377,11 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
         this._cpuType = effectiveCpuType;
         this._cpu.setCpuType(this._cpuType);
-        this.sendEvent(new OutputEvent(`[Bug65] CPU Type: ${this._cpuType}\n`, 'console'));
+        this.sendEvent(new OutputEvent(`[bug65] CPU Type: ${this._cpuType}\n`, 'console'));
 
         this.loadDebugInfo(programPath);
 
-        this.sendEvent(new OutputEvent(`[Bug65] Program loaded: Load=$${loadAddr.toString(16)} Reset=$${resetAddr.toString(16)} SP=$${spAddr.toString(16)}\n`, 'console'));
+        this.sendEvent(new OutputEvent(`[bug65] Program loaded: Load=$${loadAddr.toString(16)} Reset=$${resetAddr.toString(16)} SP=$${spAddr.toString(16)}\n`, 'console'));
 
         this._cpu.reset();
 
@@ -415,11 +409,10 @@ export class Bug65DebugSession extends LoggingDebugSession {
             vscTerminal = existing.terminal;
             terminal.reset(); // Clear previous buffer/state
             vscTerminal.show(true);
-            terminal.write(`\r\n--- Restarting ${path.basename(programPath)} ---\r\n`);
         } else {
             terminal = new Bug65Terminal();
             vscTerminal = vscode.window.createTerminal({
-                name: `Bug65: ${path.basename(programPath)}`,
+                name: `bug65: ${path.basename(programPath)}`,
                 pty: terminal,
                 iconPath: new vscode.ThemeIcon('debug-console')
             });
@@ -449,9 +442,6 @@ export class Bug65DebugSession extends LoggingDebugSession {
         terminal.onClose(() => {
             // Optional: Terminate session if terminal closes?
         });
-        // -----------------------------
-
-
 
         // Fill hooks with RTS
         for (let a = 0xFFF0; a <= 0xFFF9; a++) {
@@ -459,7 +449,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
         }
 
         this.sendResponse(response);
-        this.sendEvent(new OutputEvent(`[Bug65] System initialized. PC=$${this._cpu.getRegisters().PC.toString(16)}\n`, 'console'));
+        this.sendEvent(new OutputEvent(`[bug65] System initialized. PC=$${this._cpu.getRegisters().PC.toString(16)}\n`, 'console'));
 
         this._stopOnEntry = !!args.stopOnEntry;
         if (args.stopOnEntry) {
@@ -537,9 +527,9 @@ export class Bug65DebugSession extends LoggingDebugSession {
                 const debugObj = DebugInfoParser.parse(fs.readFileSync(dbgPath, 'utf8'));
                 this._debugInfo = debugObj;
                 this._disassembler = new Disassembler6502(this._debugInfo, this._cpuType);
-                this.sendEvent(new OutputEvent(`[Bug65] Loaded debug info: ${dbgPath}\n`, 'console'));
+                this.sendEvent(new OutputEvent(`[bug65] Loaded debug info: ${dbgPath}\n`, 'console'));
             } catch (e) {
-                this.sendEvent(new OutputEvent(`[Bug65] Failed to parse debug info: ${e}\n`, 'stderr'));
+                this.sendEvent(new OutputEvent(`[bug65] Failed to parse debug info: ${e}\n`, 'stderr'));
             }
         } else {
             this._disassembler = new Disassembler6502(undefined, this._cpuType);
@@ -856,7 +846,7 @@ class Bug65Terminal implements vscode.Pseudoterminal {
     }
 
     open(initialDimensions: vscode.TerminalDimensions | undefined): void {
-        this.writeEmitter.fire('Bug65 Terminal Active\r\n');
+        // Nothing
     }
 
     close(): void {

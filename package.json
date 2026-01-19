@@ -1,10 +1,10 @@
 {
-  "name": "bug65-vscode-monorepo",
+  "name": "bug65",
   "version": "0.1.0",
   "private": true,
   "workspaces": [
     "packages/bug65-core",
-    "packages/vscode-extension",
+    "packages/bug65-vscode-extension",
     "packages/bug65-cli"
   ],
   "scripts": {

@@ -2,14 +2,14 @@ import * as vscode from 'vscode';
 import { hello } from 'bug65-core';
 import { Bug65DebugSession } from './bug65_debug';
 
-console.log('[Bug65] Extension module loading...');
+console.log('[bug65] Extension module loading...');
 
 export function activate(context: vscode.ExtensionContext) {
     try {
-        console.log('[Bug65] Activating extension "vscode-bug65-debugger"...');
+        console.log('[bug65] Activating extension "bug65-debugger"...');
         console.log(hello());
 
-        let disposable = vscode.commands.registerCommand('vscode-bug65-debugger.helloWorld', () => {
+        let disposable = vscode.commands.registerCommand('bug65-debugger.helloWorld', () => {
             vscode.window.showInformationMessage('Hello World from bug65-vscode-debugger!');
         });
 
@@ -17,19 +17,19 @@ export function activate(context: vscode.ExtensionContext) {
 
         const factory = new Bug65DebugAdapterDescriptorFactory();
         context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('bug65', factory));
-        console.log('[Bug65] Debug Adapter Descriptor Factory registered.');
+        console.log('[bug65] Debug Adapter Descriptor Factory registered.');
 
         const provider = new Bug65ConfigurationProvider();
         context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('bug65', provider));
-        console.log('[Bug65] Debug Configuration Provider registered.');
+        console.log('[bug65] Debug Configuration Provider registered.');
     } catch (err) {
-        console.error('[Bug65] Failed to activate extension:', err);
+        console.error('[bug65] Failed to activate extension:', err);
     }
 }
 
 class Bug65DebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
     createDebugAdapterDescriptor(session: vscode.DebugSession, executable: vscode.DebugAdapterExecutable | undefined): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
-        console.log('[Bug65] createDebugAdapterDescriptor called.');
+        console.log('[bug65] createDebugAdapterDescriptor called.');
         // Always use inline debug adapter for development/debugging simplicity
         return new vscode.DebugAdapterInlineImplementation(new Bug65DebugSession());
     }
@@ -69,7 +69,7 @@ class Bug65ConfigurationProvider implements vscode.DebugConfigurationProvider {
     provideDebugConfigurations(folder: vscode.WorkspaceFolder | undefined, token?: vscode.CancellationToken): vscode.ProviderResult<vscode.DebugConfiguration[]> {
         return [
             {
-                name: "Run Bug65 Program",
+                name: "Run bug65 Program",
                 type: "bug65",
                 request: "launch",
                 program: "${workspaceFolder}/program.bin",

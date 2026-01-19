@@ -10,7 +10,7 @@
     *   Cycle-accurate simulation (approximate).
     *   Support for parsing `cc65` debug information (`.dbg` files).
 
-*   **VS Code Extension (`vscode-bug65-debugger`)**:
+*   **VS Code Extension (`bug65-debugger`)**:
     *   Implementation of the Debug Adapter Protocol (DAP).
     *   Launch configuration support for binary programs.
     *   View CPU registers (A, X, Y, PC, SP, Status).
@@ -57,7 +57,7 @@ For reference, the `launch.json` configuration used to run the extension is:
     "type": "extensionHost",
     "request": "launch",
     "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension"
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/bug65-vscode-extension"
     ],
     "outFiles": [
         "${workspaceFolder}/packages/*/out/**/*.js"

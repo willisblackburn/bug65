@@ -17,7 +17,7 @@
             "path": "./packages/bug65-core"
         },
         {
-            "path": "./packages/vscode-extension"
+            "path": "./packages/bug65-vscode-extension"
         },
         {
             "path": "./packages/bug65-cli"
