@@ -63,7 +63,7 @@ export interface ScopeInfo {
     name: string;
     symId?: number; // Symbol ID of the function or block name
     parentId?: number;
-    type?: number; // scope type
+    type?: string; // scope type (e.g. "scope", "struct")
     size?: number; // size of locals?
     spans: number[]; // Span IDs belonging to this scope
 }
@@ -199,6 +199,20 @@ export class DebugInfo {
         }
 
         return [];
+    }
+
+    public getScopeChain(leafScopeId: number): ScopeInfo[] {
+        const chain: ScopeInfo[] = [];
+        let current: ScopeInfo | undefined = this.scopes.get(leafScopeId);
+        while (current) {
+            chain.push(current);
+            if (current.parentId !== undefined) {
+                current = this.scopes.get(current.parentId);
+            } else {
+                current = undefined;
+            }
+        }
+        return chain;
     }
 
     public getVariablesForScope(scopeId: number): CSymbolInfo[] {
@@ -348,7 +362,7 @@ export class DebugInfoParser {
                         const name = props.get('name')!.replace(/"/g, '');
                         const symId = props.has('sym') ? parseInt(props.get('sym')!) : undefined;
                         const parentId = props.has('parent') ? parseInt(props.get('parent')!) : undefined;
-                        const type = props.has('type') ? parseInt(props.get('type')!) : undefined;
+                        const type = props.get('type');
                         const size = props.has('size') ? parseInt(props.get('size')!) : undefined;
 
                         const spanStr = props.get('span');
@@ -469,36 +483,52 @@ export class VariableResolver {
         const addr = (sp + sym.offset) & 0xFFFF;
         let size = 2; // Default to int/ptr
         let typeName = "int";
+        let isPtr = false;
+        let isArray = false;
+        let isStruct = false;
 
         if (typeInfo) {
-            // Very basic heuristic until we have full type parsing
-            if (typeInfo.kind) {
-                // val="00" -> void/int?
-                // val starting with 80...
-                typeName = `type_${typeInfo.kind}`;
-            }
             if (typeInfo.size > 0) {
                 size = typeInfo.size;
             }
+            if (typeInfo.kind) {
+                const k = parseInt(typeInfo.kind, 16);
+                // cc65 type encoding heuristics
+                if ((k & 0xF0) === 0x80) { isPtr = true; typeName = "ptr"; } // Pointer
+                else if ((k & 0xF0) === 0x90) { isArray = true; typeName = "array"; } // Array
+                else if ((k & 0xF0) === 0xA0) { isStruct = true; typeName = "struct"; } // Struct
+            }
         }
-
-        // TODO: Map 'val' code to size if size is 0
-        // e.g. check known patterns. 
-        // For now, default to 2.
 
         let val = 0;
         let valStr = "";
 
-        if (size === 1) {
+        if (isArray || isStruct) {
+            valStr = `@ $${addr.toString(16).toUpperCase().padStart(4, '0')}`;
+        } else if (size === 1) {
             val = mem.read(addr);
-            valStr = `$${val.toString(16).toUpperCase().padStart(2, '0')} (${val})`;
-            typeName = "char"; // Guess
+            const c = val >= 32 && val <= 126 ? String.fromCharCode(val) : '.';
+            valStr = `$${val.toString(16).toUpperCase().padStart(2, '0')} (${val}) '${c}'`;
+            if (!isPtr) typeName = "char";
         } else if (size === 2) {
             val = mem.readWord(addr);
-            valStr = `$${val.toString(16).toUpperCase().padStart(4, '0')} (${val})`;
+            const hex = val.toString(16).toUpperCase().padStart(4, '0');
+            if (isPtr) {
+                valStr = `$${hex}`;
+            } else {
+                // Treat as signed int usually? Or unsigned? cc65 default int is 16-bit
+                const signed = val >= 32768 ? val - 65536 : val;
+                valStr = `${signed} ($${hex})`;
+            }
+        } else if (size === 4) {
+            // Long
+            const low = mem.readWord(addr);
+            const high = mem.readWord(addr + 2);
+            val = (high << 16) | low;
+            valStr = `$${val.toString(16).toUpperCase()}`;
+            typeName = "long";
         } else {
-            // larger types
-            valStr = `[${size} bytes] @ $${addr.toString(16)}`;
+            valStr = `[${size} bytes] @ $${addr.toString(16).toUpperCase().padStart(4, '0')}`;
         }
 
         return { value: val, str: valStr, type: typeName };

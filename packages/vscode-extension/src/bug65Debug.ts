@@ -667,18 +667,13 @@ export class Bug65DebugSession extends LoggingDebugSession {
                     // Check for C function scope
                     const scopes = this._debugInfo.getScopesForAddress(addr);
                     if (scopes.length > 0) {
-                        // Use the innermost scope name? Or outer function?
-                        // If innermost is a block, maybe we want the function name?
-                        // Let's just use the innermost for now, or find one with type 'scope'?
-                        // cc65 debug output: type=scope for functions in sample.
-                        const funcScope = scopes.find(s => s.type === 1 || s.type === undefined); // Check type meaning properly later
+                        const leaf = scopes[0];
+                        const chain = this._debugInfo.getScopeChain(leaf.id);
+                        // Find first scope with type='scope' (function) or just use the last (root) if not found
+                        const funcScope = chain.find(s => s.type === 'scope') || chain[chain.length - 1];
+
                         if (funcScope) {
-                            // If it starts with underscore, strip it (C name mangling)
                             let funcName = funcScope.name;
-                            if (funcName.startsWith('_')) funcName = funcName.substring(1);
-                            name = funcName;
-                        } else if (scopes[0]) {
-                            let funcName = scopes[0].name;
                             if (funcName.startsWith('_')) funcName = funcName.substring(1);
                             if (funcName) name = funcName;
                         }
@@ -819,8 +814,12 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
                 const varsToShow = new Map<string, any>(); // Name -> CSymbolInfo
 
+                // Find deepest scope
+                const leafScope = scopes[0];
+                const chain = this._debugInfo!.getScopeChain(leafScope.id);
+
                 // Iterate scopes from leaf (deepest) to root
-                for (const scope of scopes) {
+                for (const scope of chain) {
                     const vars = this._debugInfo!.getVariablesForScope(scope.id);
                     for (const v of vars) {
                         if (v.sc === 'auto') {
