@@ -8,7 +8,7 @@ import {
     Thread, Scope, Source, Handles, Breakpoint, StackFrame
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { Cpu6502, Memory, CpuRegisters, Bug65Host, DebugInfo, DebugInfoParser, Disassembler6502, ProgramLoader, CpuType } from 'bug65-core';
+import { Cpu6502, Memory, CpuRegisters, Bug65Host, DebugInfo, DebugInfoParser, Disassembler6502, ProgramLoader, CpuType, VariableResolver, TypeInfo } from 'bug65-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -663,6 +663,26 @@ export class Bug65DebugSession extends LoggingDebugSession {
                         sourcePath = candidate;
                     }
                     source = new Source(path.basename(sourcePath), sourcePath);
+
+                    // Check for C function scope
+                    const scopes = this._debugInfo.getScopesForAddress(addr);
+                    if (scopes.length > 0) {
+                        // Use the innermost scope name? Or outer function?
+                        // If innermost is a block, maybe we want the function name?
+                        // Let's just use the innermost for now, or find one with type 'scope'?
+                        // cc65 debug output: type=scope for functions in sample.
+                        const funcScope = scopes.find(s => s.type === 1 || s.type === undefined); // Check type meaning properly later
+                        if (funcScope) {
+                            // If it starts with underscore, strip it (C name mangling)
+                            let funcName = funcScope.name;
+                            if (funcName.startsWith('_')) funcName = funcName.substring(1);
+                            name = funcName;
+                        } else if (scopes[0]) {
+                            let funcName = scopes[0].name;
+                            if (funcName.startsWith('_')) funcName = funcName.substring(1);
+                            if (funcName) name = funcName;
+                        }
+                    }
                 }
             }
         }
@@ -676,6 +696,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
         const scopes = new Array<Scope>();
         scopes.push(new Scope("Registers", this._variableHandles.create("registers"), false));
         scopes.push(new Scope("Flags", this._variableHandles.create("flags"), false));
+        scopes.push(new Scope("Locals", this._variableHandles.create("loc"), false));
         scopes.push(new Scope("Stack", this._variableHandles.create("stack"), false));
 
         response.body = {
@@ -775,6 +796,60 @@ export class Bug65DebugSession extends LoggingDebugSession {
                         name: `$${addr.toString(16).toUpperCase()}`,
                         type: "integer",
                         value: `$${val.toString(16).toUpperCase()}`,
+                        variablesReference: 0
+                    });
+                }
+            }
+        } else if (id === "loc") {
+            const pc = this._cpu.getRegisters().PC;
+            const scopes = this._debugInfo?.getScopesForAddress(pc);
+
+            if (scopes && scopes.length > 0) {
+                // Find deepest function scope or block
+                // For now, iterate all scopes (including nested) and show vars
+                // User requirement: "current scope may be inside a while loop... and ... enclosed in a function"
+                // So we want to union variables from all active scopes for this PC.
+
+                // Read C Stack Pointer
+                // Bug65Host.spAddress is the ZP address.
+                // We need to read the 16-bit value AT that address.
+                const spZp = this._host.getSpAddress();
+                const mem = this._memory;
+                const sp = (mem.read(spZp + 1) << 8) | mem.read(spZp);
+
+                const varsToShow = new Map<string, any>(); // Name -> CSymbolInfo
+
+                // Iterate scopes from leaf (deepest) to root
+                for (const scope of scopes) {
+                    const vars = this._debugInfo!.getVariablesForScope(scope.id);
+                    for (const v of vars) {
+                        if (v.sc === 'auto') {
+                            // Shadowing check: if already exists, skip? Or show?
+                            // Typically debugger shows innermost.
+                            if (!varsToShow.has(v.name)) {
+                                varsToShow.set(v.name, v);
+                            }
+                        }
+                    }
+                }
+
+                for (const v of varsToShow.values()) {
+                    // Calculate address: SP + offset
+                    // Note: offset can be negative (local) or positive (arg)
+                    // But effectively it is just SP + offset.
+                    // const addr = (sp + v.offset) & 0xFFFF;
+
+                    let typeInfo: TypeInfo | undefined;
+                    if (this._debugInfo) {
+                        typeInfo = this._debugInfo.types.get(v.typeId);
+                    }
+
+                    const resolved = VariableResolver.resolveValue(mem, sp, v, typeInfo);
+
+                    variables.push({
+                        name: v.name,
+                        type: resolved.type,
+                        value: resolved.str,
                         variablesReference: 0
                     });
                 }

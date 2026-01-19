@@ -58,6 +58,36 @@ export interface LibraryInfo {
     name: string;
 }
 
+export interface ScopeInfo {
+    id: number;
+    name: string;
+    symId?: number; // Symbol ID of the function or block name
+    parentId?: number;
+    type?: number; // scope type
+    size?: number; // size of locals?
+    spans: number[]; // Span IDs belonging to this scope
+}
+
+export interface CSymbolInfo {
+    id: number;
+    name: string;
+    scopeId: number;
+    typeId: number;
+    sc: string; // Storage class (auto, static, register, extern)
+    offset: number; // Offset from stack pointer (for auto)
+    symId?: number; // Related symbol ID (for static/extern address)
+}
+
+export interface TypeInfo {
+    id: number;
+    size: number;
+    baseId?: number; // Type ID of base type (e.g. pointer to...)
+    name?: string; // struct/union tag or typedef name
+    kind?: string; // e.g. "ptr", "struct", "func", "array"
+    memberIds?: number[]; // For structs/unions
+    count?: number; // Array element count
+}
+
 export class DebugInfo {
     public files: Map<number, SourceFile> = new Map();
     public segments: Map<number, SegmentInfo> = new Map();
@@ -68,9 +98,13 @@ export class DebugInfo {
     public modules: Map<number, ModuleInfo> = new Map();
     public libraries: Map<number, LibraryInfo> = new Map();
 
+    // New C Debug Info
+    public scopes: Map<number, ScopeInfo> = new Map();
+    public csymbols: Map<number, CSymbolInfo> = new Map();
+    public types: Map<number, TypeInfo> = new Map();
 
-
-    // Derived map: fileId -> isLibrary
+    // Derived: Scope hierarchy and Span->Scope map
+    public spanToScopes: Map<number, number[]> = new Map(); // Span ID -> List of Scope IDs (leaf first)
 
     // Derived map: fileId -> isLibrary
     public fileIsLibrary: Map<number, boolean> = new Map();
@@ -142,6 +176,41 @@ export class DebugInfo {
         }
     }
 
+    public getScopesForAddress(addr: number): ScopeInfo[] {
+        const candidateSpans = this.spanTree.search(addr, addr);
+        // Find specific span (smallest)
+        if (candidateSpans.length === 0) return [];
+
+        // Sort by size ascending (smallest first) - assume smallest span is most specific
+        candidateSpans.sort((a, b) => a.size - b.size);
+
+        // Try to find scopes attached to spans, starting from most specific
+        for (const span of candidateSpans) {
+            const scopeIds = this.spanToScopes.get(span.id);
+            if (scopeIds && scopeIds.length > 0) {
+                // Resolve scope objects
+                const scopes: ScopeInfo[] = [];
+                for (const sid of scopeIds) {
+                    const scope = this.scopes.get(sid);
+                    if (scope) scopes.push(scope);
+                }
+                return scopes;
+            }
+        }
+
+        return [];
+    }
+
+    public getVariablesForScope(scopeId: number): CSymbolInfo[] {
+        const vars: CSymbolInfo[] = [];
+        for (const sym of this.csymbols.values()) {
+            if (sym.scopeId === scopeId) {
+                vars.push(sym);
+            }
+        }
+        return vars;
+    }
+
     public finalize() {
         // Build fileIsLibrary map
         for (const mod of this.modules.values()) {
@@ -156,6 +225,18 @@ export class DebugInfo {
             if (seg) {
                 span.absStart = seg.start + span.start;
                 this.spanTree.insert(span.absStart, span.absStart + span.size - 1, span);
+            }
+        }
+
+        // Map spans to scopes
+        for (const scope of this.scopes.values()) {
+            for (const sid of scope.spans) {
+                let list = this.spanToScopes.get(sid);
+                if (!list) {
+                    list = [];
+                    this.spanToScopes.set(sid, list);
+                }
+                list.push(scope.id);
             }
         }
     }
@@ -261,6 +342,47 @@ export class DebugInfoParser {
                         rawLines.push({ fileId, lineNum, spanIds, type });
                     }
                     break;
+                case 'scope':
+                    if (props.has('id') && props.has('name')) {
+                        const id = parseInt(props.get('id')!);
+                        const name = props.get('name')!.replace(/"/g, '');
+                        const symId = props.has('sym') ? parseInt(props.get('sym')!) : undefined;
+                        const parentId = props.has('parent') ? parseInt(props.get('parent')!) : undefined;
+                        const type = props.has('type') ? parseInt(props.get('type')!) : undefined;
+                        const size = props.has('size') ? parseInt(props.get('size')!) : undefined;
+
+                        const spanStr = props.get('span');
+                        const spans = spanStr ? spanStr.split('+').map(s => parseInt(s)) : [];
+
+                        info.scopes.set(id, { id, name, symId, parentId, type, size, spans });
+                    }
+                    break;
+                case 'csym':
+                    if (props.has('id') && props.has('name')) {
+                        const id = parseInt(props.get('id')!);
+                        const name = props.get('name')!.replace(/"/g, '');
+                        const scopeId = parseInt(props.get('scope')!);
+                        const typeId = parseInt(props.get('type')!);
+                        const sc = props.get('sc')!;
+                        const offset = props.has('offs') ? this.parseNumber(props.get('offs')!) : 0;
+                        const symId = props.has('sym') ? parseInt(props.get('sym')!) : undefined;
+
+                        info.csymbols.set(id, { id, name, scopeId, typeId, sc, offset, symId });
+                    }
+                    break;
+                case 'type':
+                    if (props.has('id') && props.has('val')) {
+                        const id = parseInt(props.get('id')!);
+                        const val = props.get('val')!.replace(/"/g, '');
+                        // Store raw val for now
+                        info.types.set(id, { id, size: 0, kind: val });
+                    } else if (props.has('id') && props.has('size')) {
+                        const id = parseInt(props.get('id')!);
+                        const size = this.parseNumber(props.get('size')!);
+                        const baseId = props.has('base') ? parseInt(props.get('base')!) : undefined;
+                        info.types.set(id, { id, size, baseId });
+                    }
+                    break;
             }
         }
 
@@ -339,5 +461,46 @@ export class DebugInfoParser {
         }
 
         return undefined;
+    }
+}
+
+export class VariableResolver {
+    public static resolveValue(mem: { read(addr: number): number, readWord(addr: number): number }, sp: number, sym: CSymbolInfo, typeInfo?: TypeInfo): { value: number, str: string, type: string } {
+        const addr = (sp + sym.offset) & 0xFFFF;
+        let size = 2; // Default to int/ptr
+        let typeName = "int";
+
+        if (typeInfo) {
+            // Very basic heuristic until we have full type parsing
+            if (typeInfo.kind) {
+                // val="00" -> void/int?
+                // val starting with 80...
+                typeName = `type_${typeInfo.kind}`;
+            }
+            if (typeInfo.size > 0) {
+                size = typeInfo.size;
+            }
+        }
+
+        // TODO: Map 'val' code to size if size is 0
+        // e.g. check known patterns. 
+        // For now, default to 2.
+
+        let val = 0;
+        let valStr = "";
+
+        if (size === 1) {
+            val = mem.read(addr);
+            valStr = `$${val.toString(16).toUpperCase().padStart(2, '0')} (${val})`;
+            typeName = "char"; // Guess
+        } else if (size === 2) {
+            val = mem.readWord(addr);
+            valStr = `$${val.toString(16).toUpperCase().padStart(4, '0')} (${val})`;
+        } else {
+            // larger types
+            valStr = `[${size} bytes] @ $${addr.toString(16)}`;
+        }
+
+        return { value: val, str: valStr, type: typeName };
     }
 }

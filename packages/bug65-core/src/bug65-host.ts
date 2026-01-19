@@ -152,6 +152,10 @@ export class Bug65Host {
         console.error(`[Bug65Host] SP ZP Address set to $${addr.toString(16).padStart(2, '0')}`);
     }
 
+    public getSpAddress(): number {
+        return this.spAddress;
+    }
+
     private getAX(): number {
         const regs = this.cpu.getRegisters();
         return (regs.X << 8) | regs.A;

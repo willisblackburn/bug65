@@ -38,4 +38,34 @@ if (line2.line !== 10) {
 }
 console.log("PASS: Span 2 mapped correctly.");
 
+console.log("PASS: Span 2 mapped correctly.");
+
+const cDebugContent = `
+file id=1,name="test.c",size=100
+seg id=1,name="CODE",start=0x1000,size=256
+span id=1,seg=1,start=0,size=10
+scope id=1,name="my_func",mod=0,type=scope,size=24,parent=0,sym=0,span=1
+csym id=0,name="local_var",scope=1,type=0,sc=auto,offs=-2
+type id=0,val="00"
+`;
+
+const cInfo = DebugInfoParser.parse(cDebugContent);
+const scope = cInfo.scopes.get(1);
+if (!scope || scope.name !== "my_func") {
+    console.error("FAILED: Scope 'my_func' not parsed correctly.");
+    process.exit(1);
+}
+console.log("PASS: Scope parsed.");
+
+const vars = cInfo.getVariablesForScope(1);
+if (vars.length !== 1 || vars[0].name !== "local_var") {
+    console.error("FAILED: Variable 'local_var' not found in scope.");
+    process.exit(1);
+}
+if (vars[0].offset !== -2) {
+    console.error("FAILED: Variable offset incorrect.");
+    process.exit(1);
+}
+console.log("PASS: Variables parsed.");
+
 console.log("All tests passed.");
