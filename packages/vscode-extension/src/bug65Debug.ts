@@ -1,4 +1,6 @@
 
+import * as vscode from 'vscode';
+
 import {
     Logger, logger,
     LoggingDebugSession,
@@ -177,9 +179,16 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
             if (cycles === 0) {
                 // Hit a breakpoint (or trap)
-                this._stepMode = undefined; // Clear step mode
-                this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
-                running = false;
+
+                if (this._host.waitingForInput) {
+                    // Blocked on I/O
+                    running = false;
+                } else {
+                    // Breakpoint or Step
+                    this._stepMode = undefined;
+                    this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
+                    running = false;
+                }
                 break;
             }
         }
@@ -340,6 +349,39 @@ export class Bug65DebugSession extends LoggingDebugSession {
         // Configure Host for this run
         this._host.setSpAddress(spAddr);
         this._host.commandLineArgs = [programPath, ...(args.args || [])];
+
+        // --- Terminal Integration ---
+        const terminal = new Bug65Terminal();
+        const vscTerminal = vscode.window.createTerminal({
+            name: `Bug65 Terminal`,
+            pty: terminal,
+            iconPath: new vscode.ThemeIcon('debug-console')
+        });
+        vscTerminal.show(true);
+
+        // Hook up output
+        this._host.onWrite = (val: number) => {
+            terminal.write(String.fromCharCode(val));
+        };
+
+        // Hook up input
+        terminal.onInput((data) => {
+            const bytes = new Uint8Array(data.length);
+            for (let i = 0; i < data.length; i++) {
+                bytes[i] = data.charCodeAt(i);
+            }
+            this._host.writeInput(bytes);
+
+            // If we were waiting for input, resume execution
+            if (this._host.waitingForInput) {
+                this.runLoop();
+            }
+        });
+
+        terminal.onClose(() => {
+            // Optional: Terminate session if terminal closes?
+        });
+        // -----------------------------
 
 
 
@@ -678,4 +720,66 @@ export class Bug65DebugSession extends LoggingDebugSession {
     }
 
 
+}
+
+class Bug65Terminal implements vscode.Pseudoterminal {
+    private writeEmitter = new vscode.EventEmitter<string>();
+    onDidWrite: vscode.Event<string> = this.writeEmitter.event;
+
+    private closeEmitter = new vscode.EventEmitter<void>();
+    onDidClose: vscode.Event<void> = this.closeEmitter.event;
+
+    private inputEmitter = new vscode.EventEmitter<string>();
+
+    // Custom event to subscribe to input
+    public onInput(listener: (data: string) => void) {
+        this.inputEmitter.event(listener);
+    }
+
+    public onClose(listener: () => void) {
+        this.closeEmitter.event(listener);
+    }
+
+    open(initialDimensions: vscode.TerminalDimensions | undefined): void {
+        this.writeEmitter.fire('Bug65 Terminal Active\r\n');
+    }
+
+    close(): void {
+        this.closeEmitter.fire();
+    }
+
+    handleInput(data: string): void {
+        // Echo input locally?
+        // Usually psuedoterminals don't echo unless we want to simulate a shell.
+        // But for a raw program interface, we might want to see what we type.
+        // Let's toggle echo.
+        // The user specifically asked for a terminal, which implies echo usually.
+        // But if the program handles it (like curses), double echo is bad.
+        // Standard terminals echo canonical mode.
+        // Let's implement local echo for newlines at least.
+
+        // Actually, simplest is to just forward input.
+        // If the user types 'A', sending 'A'.
+        // If they hit enter, send '\r'.
+        // The program should ideally echo if it wants.
+        // BUT, since we have no line discipline here, it feels weird if typing is invisible.
+        // Let's echo carriage returns as \r\n for display, and maybe chars.
+
+        if (data === '\r') {
+            this.writeEmitter.fire('\r\n');
+        } else {
+            this.writeEmitter.fire(data);
+        }
+
+        this.inputEmitter.fire(data);
+    }
+
+    write(data: string) {
+        // Handle newlines: default to CRLF expectation.
+        // If we receive \n, map to \r\n. 
+        // If the source was already \r\n, we get \r then \n -> \r then \r\n. (\r\r\n).
+        // This is visually harmless (double CR).
+        const formatted = data.replace(/\n/g, '\r\n');
+        this.writeEmitter.fire(formatted);
+    }
 }

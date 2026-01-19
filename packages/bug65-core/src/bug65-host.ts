@@ -11,10 +11,24 @@ export interface IOStrategy {
 }
 
 class ConsoleStrategy implements IOStrategy {
+    public inputBuffer: number[] = [];
+
     constructor(private onWrite?: (val: number) => void) { }
 
     read(count: number): Uint8Array {
-        return new Uint8Array(0); // EOF for now
+        if (this.inputBuffer.length === 0) {
+            return new Uint8Array(0);
+        }
+        const len = Math.min(count, this.inputBuffer.length);
+        const res = new Uint8Array(this.inputBuffer.slice(0, len));
+        this.inputBuffer = this.inputBuffer.slice(len);
+        return res;
+    }
+
+    addInput(data: Uint8Array) {
+        for (let i = 0; i < data.length; i++) {
+            this.inputBuffer.push(data[i]);
+        }
     }
 
     write(data: Uint8Array): number {
@@ -87,6 +101,11 @@ export class Bug65Host {
     private memory: IMemory;
     public onExit: ((code: number) => void) | undefined;
     public onWrite: ((val: number) => void) | undefined;
+
+    // New: Event for when the host is waiting for input
+    public onWaitForInput: (() => void) | undefined;
+    public waitingForInput: boolean = false;
+
     public commandLineArgs: string[] = ["bug65"];
     private spAddress: number = 0x00; // Default to $00 (cc65 default)
 
@@ -119,6 +138,13 @@ export class Bug65Host {
         this.fds.set(0, consoleStrategy); // Stdin
         this.fds.set(1, consoleStrategy); // Stdout
         this.fds.set(2, consoleStrategy); // Stderr
+    }
+
+    public writeInput(data: Uint8Array) {
+        const stdin = this.fds.get(0);
+        if (stdin instanceof ConsoleStrategy) {
+            stdin.addInput(data);
+        }
     }
 
     public setSpAddress(addr: number): void {
@@ -175,6 +201,26 @@ export class Bug65Host {
         return val;
     }
 
+    private peekParam(bytes: number, offsetBytes: number = 0): number {
+        const spZp = this.spAddress;
+        let sp = (this.memory.read(spZp + 1) << 8) | this.memory.read(spZp);
+
+        // Sim65 parameters are pushed in order, so latest is at SP.
+        // Wait, typical calling convention: push arg1, push arg2.
+        // ArgN is at top.
+        // popParam pops from top.
+        // If we want to peek params in the order popParam receives them...
+        // We need to account for previous pops.
+
+        sp = (sp + offsetBytes) & 0xFFFF;
+
+        let val = 0;
+        for (let i = 0; i < bytes; i++) {
+            val |= (this.memory.read(sp + i) << (i * 8));
+        }
+        return val;
+    }
+
     private handleTrap(pc: number): boolean {
         if (pc === this.ADDR_EXIT) {
             const exitCode = this.cpu.getRegisters().A;
@@ -188,10 +234,8 @@ export class Bug65Host {
             switch (pc) {
                 case this.ADDR_OPEN: this.pvOpen(); break;
                 case this.ADDR_CLOSE: this.pvClose(); break;
-                case this.ADDR_READ: this.pvRead(); break;
+                case this.ADDR_READ: return this.pvRead(); // Returns true if blocking
                 case this.ADDR_WRITE: this.pvWrite(); break;
-                case this.ADDR_LSEEK: this.pvLseek(); break;
-                case this.ADDR_REMOVE: this.pvRemove(); break;
                 case this.ADDR_LSEEK: this.pvLseek(); break;
                 case this.ADDR_REMOVE: this.pvRemove(); break;
                 case this.ADDR_MAPERRNO: this.pvMapErrno(); break;
@@ -200,6 +244,7 @@ export class Bug65Host {
                     // Not handled, return false? Or throw?
                     return false;
             }
+
         } catch (e) {
             console.error(`[Bug65Host] Trap error at $${pc.toString(16)}:`, e);
             this.setAX(0xFFFF); // Return -1 on error
@@ -270,11 +315,76 @@ export class Bug65Host {
 
     private pvRead() {
         const count = this.getAX();
-        const bufAddr = this.popParam(2);
-        const fd = this.popParam(2);
+
+        // Peek params instead of popping immediately
+        // Layout: [FD (2)] [BufAddr (2)] (Top of stack) -> popped in reverse order in pvRead originally?
+        // Original: popParam(2) (bufAddr) -> popParam(2) (fd) ?
+        // Wait, original:
+        // const bufAddr = this.popParam(2);
+        // const fd = this.popParam(2);
+        // So bufAddr is at SP, fd is at SP+2.
+
+        const bufAddr = this.peekParam(2, 0);
+        const fd = this.peekParam(2, 2);
+
+        // Check if we need to block
+        if (fd === 0) { // Stdin
+            const strat = this.fds.get(0);
+            if (strat instanceof ConsoleStrategy) {
+                // If asking for >0 bytes and buffer is empty
+                if (count > 0 && strat.read(0).length === 0) {
+                    // We check length 0 read? No, read(0) returns empty.
+                    // We need to check if buffer is empty.
+                    // I need to expose 'hasInput' or use read(0) behavior?
+                    // ConsoleStrategy.read doesn't support "peek".
+                    // But I modified read() to buffer.
+                    // I will trust that if I read 1 byte and get 0, it's empty.
+                    // Actually, I can check specific property or method.
+                    // Let's rely on simulated read.
+                    // Hack: strat.read is consuming. I can't check without consuming.
+                    // I should expose `hasInput` on Strategy?
+                    // Or casting to ConsoleStrategy.
+                }
+            }
+        }
+
+        // Actually, let's just make ConsoleStrategy expose a way to check.
+        // Or simpler: Try to read. If result is 0 length (and we wanted >0), treat as BLOCK?
+        // But what if it's EOF?
+        // Standard behavior: 
+        //  - If blocking mode: wait.
+        //  - If non-blocking: return 0 (or -1 with EAGAIN).
+        // User wants blocking.
+        // So if count > 0 and we get 0 bytes, we BLOCK.
 
         const strat = this.fds.get(fd);
         if (strat) {
+
+            // Special handling for Console/Blocking strategies
+            // We need to know if it's blocking. For now only stdin(0).
+            if (fd === 0 && count > 0) {
+                // Check available input
+                // Cast to ConsoleStrategy to peek buffer length?
+                if (strat instanceof ConsoleStrategy) {
+                    // @ts-ignore
+                    if (strat.inputBuffer.length === 0) {
+                        this.waitingForInput = true;
+                        if (this.onWaitForInput) this.onWaitForInput();
+                        // Return TRUE to stop execution (trap handled, but halt step)
+                        // We do NOT pop params. We do NOT advance PC.
+                        // Ideally checking this.onTrap return value.
+                        // Bug65Host.handleTrap returns boolean.
+                        // pvRead doesn't return value in current signature, need to modify flow.
+                        return true;
+                    }
+                }
+            }
+
+            // Proceed with read
+            // NOW we pop params
+            this.popParam(2); // bufAddr
+            this.popParam(2); // fd
+
             try {
                 const data = strat.read(count);
                 // Write back to memory
@@ -286,8 +396,13 @@ export class Bug65Host {
                 this.setAX(0xFFFF);
             }
         } else {
+            // Bad FD
+            this.popParam(2);
+            this.popParam(2);
             this.setAX(0xFFFF);
         }
+        this.waitingForInput = false;
+        return false; // Done, continue execution
     }
 
     private pvWrite() {

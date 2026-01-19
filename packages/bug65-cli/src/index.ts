@@ -225,57 +225,120 @@ function main() {
 
         // Run loop
 
-        while (true) {
-            if (traceMode !== 'off' && cpu) {
-                const regs = cpu.getRegisters();
+        // Async Run Loop
+        let running = true;
 
-                if (traceMode === 'source') {
-                    if (debugInfo) {
-                        const lineInfo = debugInfo.getLineForAddress(regs.PC);
-                        if (lineInfo) {
-                            if (lineInfo.fileId !== lastSourceFileId || lineInfo.line !== lastSourceLineNum) {
-                                const srcLine = getSourceLine(lineInfo.fileId, lineInfo.line);
-                                if (srcLine) {
-                                    // Clean up the line for printing
-                                    console.error(`${srcLine.trim()}`);
-                                    lastSourceFileId = lineInfo.fileId;
-                                    lastSourceLineNum = lineInfo.line;
+        // Setup input handling
+        process.stdin.resume(); // Start reading
+
+        host.onWaitForInput = () => {
+            // Loop will naturally stop if we check waitingForInput
+            // Just ensure we don't schedule next batch
+            running = false;
+        };
+
+        process.stdin.on('data', (chunk) => {
+            const bytes = new Uint8Array(chunk);
+            host.writeInput(bytes);
+
+            if (host.waitingForInput) {
+                // Resume execution
+                host.waitingForInput = false; // Manually clear? 
+                // Actually pvRead clears it on success.
+                // But we need to restart the loop so pvRead gets called again.
+                // Wait, pvRead returned true (blocked). PC is same.
+                // CPU step needs to be called again.
+                running = true;
+                runLoop();
+            }
+        });
+
+        const runLoop = () => {
+            if (!running) return;
+
+            // Run a batch of cycles to avoid starvation
+            // 10,000 cycles is roughly 10ms at 1MHz, good balance
+            const batchSize = 10000;
+            let cycles = 0;
+
+            try {
+                // Inner sync loop for performance
+                while (cycles < batchSize) {
+                    if (traceMode !== 'off' && cpu) {
+                        const regs = cpu.getRegisters();
+
+                        if (traceMode === 'source') {
+                            if (debugInfo) {
+                                const lineInfo = debugInfo.getLineForAddress(regs.PC);
+                                if (lineInfo) {
+                                    if (lineInfo.fileId !== lastSourceFileId || lineInfo.line !== lastSourceLineNum) {
+                                        const srcLine = getSourceLine(lineInfo.fileId, lineInfo.line);
+                                        if (srcLine) {
+                                            console.error(`${srcLine.trim()}`);
+                                            lastSourceFileId = lineInfo.fileId;
+                                            lastSourceLineNum = lineInfo.line;
+                                        }
+                                    }
                                 }
                             }
+                        } else {
+                            // Disassemble mode
+                            printDisassembly(cpu, memory!, disassembler, debugInfo);
                         }
                     }
-                } else {
-                    // Disassemble mode
-                    printDisassembly(cpu, memory, disassembler, debugInfo);
+
+                    const stepCycles = cpu!.step();
+                    cycles += stepCycles;
+
+                    if (stepCycles === 0) {
+                        // Trap handled or breakpoint (if we had them)
+                        if (host.waitingForInput) {
+                            running = false;
+                            break;
+                        }
+                        // Other 0 cycle events (breakpoints?) - safely continue for now unless explicitly stopped
+                    }
                 }
+            } catch (e: any) {
+                handleError(e, cpu, memory);
+                return;
             }
-            // Check for FFF7 manually here or add to host
-            cpu.step();
-        }
+
+            if (running) {
+                setImmediate(runLoop);
+            }
+        };
+
+        // Start loop
+        runLoop();
 
     } catch (e: any) {
-        console.error(`\nError executing program: ${e.message}`);
-
-        if (cpu && memory) {
-            const pc = cpu.getRegisters().PC;
-            console.error(`PC: $${pc.toString(16).toUpperCase()}`);
-            console.error(`Registers: A=$${cpu.getRegisters().A.toString(16).toUpperCase()} X=$${cpu.getRegisters().X.toString(16).toUpperCase()} Y=$${cpu.getRegisters().Y.toString(16).toUpperCase()} SP=$${cpu.getRegisters().SP.toString(16).toUpperCase()} P=$${cpu.getRegisters().Status.toString(16).toUpperCase()}`);
-
-            // Dump memory around PC
-            console.error("Memory near PC:");
-            const start = Math.max(0, pc - 8);
-            const end = Math.min(0xFFFF, pc + 8);
-            let dump = "";
-            for (let i = start; i <= end; i++) {
-                const val = memory.read(i).toString(16).toUpperCase().padStart(2, '0');
-                if (i === pc) dump += ` [${val}]`;
-                else dump += ` ${val}`;
-            }
-            console.error(`$${start.toString(16).toUpperCase()}: ${dump}`);
-        }
-
-        process.exit(1);
+        handleError(e, cpu, memory);
     }
+}
+
+function handleError(e: any, cpu: Cpu6502 | null, memory: Memory | null) {
+    console.error(`\nError executing program: ${e.message}`);
+
+    if (cpu && memory) {
+        const pc = cpu.getRegisters().PC;
+        console.error(`PC: $${pc.toString(16).toUpperCase()}`);
+        console.error(`Registers: A=$${cpu.getRegisters().A.toString(16).toUpperCase()} X=$${cpu.getRegisters().X.toString(16).toUpperCase()} Y=$${cpu.getRegisters().Y.toString(16).toUpperCase()} SP=$${cpu.getRegisters().SP.toString(16).toUpperCase()} P=$${cpu.getRegisters().Status.toString(16).toUpperCase()}`);
+
+        // Dump memory around PC
+        console.error("Memory near PC:");
+        const start = Math.max(0, pc - 8);
+        const end = Math.min(0xFFFF, pc + 8);
+        let dump = "";
+        for (let i = start; i <= end; i++) {
+            const val = memory.read(i).toString(16).toUpperCase().padStart(2, '0');
+            if (i === pc) dump += ` [${val}]`;
+            else dump += ` ${val}`;
+        }
+        console.error(`$${start.toString(16).toUpperCase()}: ${dump}`);
+    }
+
+    process.exit(1);
 }
 
 function printDisassembly(cpu: Cpu6502, memory: Memory, disassembler: Disassembler6502, debugInfo: DebugInfo | undefined) {
