@@ -78,7 +78,8 @@ for (const check of checks) {
     if (funcName !== check.func) {
         console.error(`  FAILED: Expected function '${check.func}', got '${funcName}'`);
     } else {
-        console.log(`  PASS: Function scope is '${funcName}'`);
+        const calculatedSize = info.getFrameSize(funcScope.id);
+        console.log(`  PASS: Function scope is '${funcName}', DbgSize: ${funcScope.size}, CalcSize: ${calculatedSize}`);
     }
 
     // Check vars

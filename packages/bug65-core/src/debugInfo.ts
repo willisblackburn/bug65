@@ -109,6 +109,9 @@ export class DebugInfo {
     // Derived map: fileId -> isLibrary
     public fileIsLibrary: Map<number, boolean> = new Map();
 
+    // Map parent -> children
+    public scopeChildren: Map<number, number[]> = new Map();
+
     // Optimized lookups
     public spanTree = new IntervalTree<SpanInfo>();
     private spanToLines: Map<number, LineInfo[]> = new Map();
@@ -225,6 +228,69 @@ export class DebugInfo {
         return vars;
     }
 
+    public getFrameSize(scopeId: number): number {
+        // Find the root function scope
+        let funcScope = this.scopes.get(scopeId);
+        while (funcScope && funcScope.parentId !== undefined) {
+            const parent = this.scopes.get(funcScope.parentId);
+            // Stop if parent is nil or global usually? 
+            // Logic: Usually function scope is top level or child of file/module? 
+            // We want the 'type=scope' that represents the function.
+            // But simpler: just traverse up to root (or module/global) and collect all vars?
+            // A function's variables are contained within its scope tree.
+            // We should find the enclosing function scope.
+            if (!parent) break;
+            if (parent.id === 0) break; // Global scope?
+            // Heuristic: If we hit a scope that is 'static' or 'global' logic?
+            // For now, let's just find the top-most scope that isn't global.
+            // But assume we are looking for the function scope.
+            funcScope = parent;
+        }
+
+        if (!funcScope) return 0;
+
+        // Collect all scopes under this function scope
+        const scopes = this.getAllDescendantScopes(funcScope.id);
+        scopes.push(funcScope);
+
+        let minOffset = 0;
+        for (const s of scopes) {
+            const vars = this.getVariablesForScope(s.id);
+            for (const v of vars) {
+                if (v.sc === 'auto' && v.offset < minOffset) {
+                    minOffset = v.offset;
+                }
+            }
+        }
+
+        return -minOffset;
+    }
+
+    private getAllDescendantScopes(scopeId: number): ScopeInfo[] {
+        const results: ScopeInfo[] = [];
+        // Inefficient linear scan, but robust
+        for (const s of this.scopes.values()) {
+            // This is actually hard because we don't store children links, only parent.
+            // But we can iterate all scopes and check ancestry.
+            // Optimization: Build children map in finalize?
+            // For now, simple check: is ancestor 'scopeId'?
+            if (s.id !== scopeId && this.isAncestor(s.id, scopeId)) {
+                results.push(s);
+            }
+        }
+        return results;
+    }
+
+    private isAncestor(childId: number, ancestorId: number): boolean {
+        let curr = this.scopes.get(childId);
+        while (curr) {
+            if (curr.parentId === ancestorId) return true;
+            if (curr.parentId === undefined) return false;
+            curr = this.scopes.get(curr.parentId);
+        }
+        return false;
+    }
+
     public finalize() {
         // Build fileIsLibrary map
         for (const mod of this.modules.values()) {
@@ -239,6 +305,18 @@ export class DebugInfo {
             if (seg) {
                 span.absStart = seg.start + span.start;
                 this.spanTree.insert(span.absStart, span.absStart + span.size - 1, span);
+            }
+        }
+
+        // Build scope children map
+        for (const scope of this.scopes.values()) {
+            if (scope.parentId !== undefined) {
+                let siblings = this.scopeChildren.get(scope.parentId);
+                if (!siblings) {
+                    siblings = [];
+                    this.scopeChildren.set(scope.parentId, siblings);
+                }
+                siblings.push(scope.id);
             }
         }
 
@@ -479,8 +557,8 @@ export class DebugInfoParser {
 }
 
 export class VariableResolver {
-    public static resolveValue(mem: { read(addr: number): number, readWord(addr: number): number }, sp: number, sym: CSymbolInfo, typeInfo?: TypeInfo): { value: number, str: string, type: string } {
-        const addr = (sp + sym.offset) & 0xFFFF;
+    public static resolveValue(mem: { read(addr: number): number, readWord(addr: number): number }, sp: number, sym: CSymbolInfo, stackFrameSize: number = 0, typeInfo?: TypeInfo): { value: number, str: string, type: string } {
+        const addr = (sp + stackFrameSize + sym.offset) & 0xFFFF;
         let size = 2; // Default to int/ptr
         let typeName = "int";
         let isPtr = false;

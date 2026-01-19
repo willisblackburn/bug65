@@ -78,7 +78,7 @@ mem.writeWord(varAddr, 1234);
 
 // Resolve
 const typeInfo = info.types.get(locVar.typeId);
-const res = VariableResolver.resolveValue(mem, sp, locVar, typeInfo);
+const res = VariableResolver.resolveValue(mem, sp, locVar, 0, typeInfo);
 
 console.log(`Resolved Value: ${res.str}, Type: ${res.type}`);
 

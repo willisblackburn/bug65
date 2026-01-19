@@ -808,7 +808,8 @@ export class Bug65DebugSession extends LoggingDebugSession {
                         typeInfo = this._debugInfo.types.get(v.typeId);
                     }
 
-                    const resolved = VariableResolver.resolveValue(mem, sp, v, typeInfo);
+                    const frameSize = this._debugInfo!.getFrameSize(v.scopeId);
+                    const resolved = VariableResolver.resolveValue(mem, sp, v, frameSize, typeInfo);
 
                     variables.push({
                         name: v.name,
