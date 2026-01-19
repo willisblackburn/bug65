@@ -690,7 +690,6 @@ export class Bug65DebugSession extends LoggingDebugSession {
         const frameId = args.frameId;
         const scopes = new Array<Scope>();
         scopes.push(new Scope("Registers", this._variableHandles.create("registers"), false));
-        scopes.push(new Scope("Flags", this._variableHandles.create("flags"), false));
         scopes.push(new Scope("Locals", this._variableHandles.create("loc"), false));
         scopes.push(new Scope("Stack", this._variableHandles.create("stack"), false));
 
@@ -706,36 +705,20 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
         if (id === "registers") {
             const regs = this._cpu.getRegisters();
-            variables.push({
-                name: "A",
-                type: "integer",
-                value: `$${regs.A.toString(16).toUpperCase().padStart(2, '0')}`,
-                variablesReference: 0
-            });
-            variables.push({
-                name: "X",
-                type: "integer",
-                value: `$${regs.X.toString(16).toUpperCase().padStart(2, '0')}`,
-                variablesReference: 0
-            });
-            variables.push({
-                name: "Y",
-                type: "integer",
-                value: `$${regs.Y.toString(16).toUpperCase().padStart(2, '0')}`,
-                variablesReference: 0
-            });
-            variables.push({
-                name: "PC",
-                type: "integer",
-                value: `$${regs.PC.toString(16).toUpperCase().padStart(4, '0')}`,
-                variablesReference: 0
-            });
-            variables.push({
-                name: "SP",
-                type: "integer",
-                value: `$${regs.SP.toString(16).toUpperCase().padStart(2, '0')}`,
-                variablesReference: 0
-            });
+            const pushReg = (name: string, value: number, length: number) => {
+                variables.push({
+                    name,
+                    type: "integer",
+                    value: `${value} ($${value.toString(16).toUpperCase().padStart(length, '0')})`,
+                    variablesReference: 0
+                });
+            };
+
+            pushReg("A", regs.A, 2);
+            pushReg("X", regs.X, 2);
+            pushReg("Y", regs.Y, 2);
+            pushReg("PC", regs.PC, 4);
+            pushReg("SP", regs.SP, 2);
 
             // Format Status with Unicode indicators
             // N V U B D I Z C
@@ -754,28 +737,10 @@ export class Bug65DebugSession extends LoggingDebugSession {
             variables.push({
                 name: "Status",
                 type: "string",
-                value: `$${s.toString(16).toUpperCase().padStart(2, '0')}  ${flagsStr}`,
+                value: `${flagsStr} ($${s.toString(16).toUpperCase().padStart(2, '0')})`,
                 variablesReference: 0
             });
 
-        } else if (id === "flags") {
-            const s = this._cpu.getRegisters().Status;
-            const addFlag = (name: string, mask: number) => {
-                variables.push({
-                    name,
-                    type: "boolean",
-                    value: (s & mask) ? "true" : "false",
-                    variablesReference: 0
-                });
-            };
-            addFlag("Negative (N)", 0x80);
-            addFlag("Overflow (V)", 0x40);
-            addFlag("Unused (U)", 0x20);
-            addFlag("Break (B)", 0x10);
-            addFlag("Decimal (D)", 0x08);
-            addFlag("Interrupt (I)", 0x04);
-            addFlag("Zero (Z)", 0x02);
-            addFlag("Carry (C)", 0x01);
         } else if (id === "stack") {
             const sp = this._cpu.getRegisters().SP;
 
