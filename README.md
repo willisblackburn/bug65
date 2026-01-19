@@ -16,6 +16,9 @@
     *   View CPU registers (A, X, Y, PC, SP, Status).
     *   Stepping, continue, and break functionality.
 
+*   **Command Line Interface (`bug65-cli`)**:
+    *   Drop-in replacement for `sim65`.
+    
 ## Prerequisites
 
 *   [Node.js](https://nodejs.org/) (version 16 or higher)
@@ -48,6 +51,27 @@ This project is structured as a monorepo using npm workspaces.
     ```
     This creates a `.vsix` file in the directory.
 
+## Usage
+
+1.  Build and package the extension.
+2.  Install the extension.
+3.  Create a `.vscode/launch.json` configuration:
+    ```json
+    {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "type": "bug65",
+                "request": "launch",
+                "name": "Debug 6502 Binary",
+                "program": "${workspaceFolder}/files/program.bin",
+                "stopOnEntry": true
+            }
+        ]
+    }
+    ```
+4.  Start debugging!
+
 ## Developing the Extension
 
 To run and debug the extension source code:
@@ -72,28 +96,6 @@ For reference, the `launch.json` configuration used to run the extension is:
     "preLaunchTask": "npm: compile"
 }
 ```
-
-## Usage
-
-1.  Open the `bug65` folder in VS Code.
-2.  Press **F5** to run the extension in the Extension Development Host.
-3.  In the new window, open a folder containing your `cc65` compiled program (raw binary).
-4.  Create a `.vscode/launch.json` configuration:
-    ```json
-    {
-        "version": "0.2.0",
-        "configurations": [
-            {
-                "type": "bug65",
-                "request": "launch",
-                "name": "Debug 6502 Binary",
-                "program": "${workspaceFolder}/files/program.bin",
-                "stopOnEntry": true
-            }
-        ]
-    }
-    ```
-5.  Start debugging!
 
 ## Testing
 
