@@ -48,12 +48,15 @@ This project is structured as a monorepo using npm workspaces.
     ```bash
     npm run package-extension
     ```
-    This script copies the license and packages the extension into `packages/bug65-vscode-extension/bug65-vscode-extension-0.1.0.vsix`.
+    This script packages the extension into `bug65-vscode-extension-0.1.0.vsix`.
 
 ## Usage
 
 1.  Build and package the extension.
-2.  Install the extension.
+2.  Install the extension. Choose "Install from VSIX..." from the Extensions view (Ctrl+Shift+X) and select the `bug65-vscode-extension-0.1.0.vsix` file, or:
+    ```bash
+    code --install-extension bug65-vscode-extension-0.1.0.vsix
+    ```
 3.  Create a `.vscode/launch.json` configuration:
     ```json
     {
