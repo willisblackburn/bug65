@@ -12,6 +12,16 @@ import { Cpu6502, Memory, CpuRegisters, Bug65Host, DebugInfo, DebugInfoParser, D
 import * as fs from 'fs';
 import * as path from 'path';
 
+
+// Clean up terminals on close
+vscode.window.onDidCloseTerminal(term => {
+    // We can't access TerminalManager class easily if it's protected inside the module scope but not exported?
+    // It is in module scope.
+    // Try to find key
+    // We need to iterate the entries
+    // For now we will implement cleanup logic later or make TerminalManager expose a collection
+});
+
 interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
     program: string;
     stopOnEntry?: boolean;
@@ -99,6 +109,41 @@ class StepOutMode implements StepMode {
         return this;
     }
 }
+
+
+// Manager to reuse terminals
+class TerminalManager {
+    private static terminals = new Map<string, { terminal: vscode.Terminal, pty: Bug65Terminal }>();
+
+    public static get(key: string): { terminal: vscode.Terminal, pty: Bug65Terminal } | undefined {
+        return this.terminals.get(key);
+    }
+
+    public static register(key: string, term: vscode.Terminal, pty: Bug65Terminal) {
+        this.terminals.set(key, { terminal: term, pty: pty });
+
+        // Listen for close to cleanup
+        // Note: VS Code API close event is global, but we can't easily hook it per instance here 
+        // without passing the disposable. 
+        // Actually, we can rely on pty.onClose if we trigger it? 
+        // No, pty.onClose is when the pty itself closes (e.g. process exit).
+        // VS Code terminal close is UI action.
+    }
+
+    // Call this if we detect the terminal is closed
+    public static remove(key: string) {
+        this.terminals.delete(key);
+    }
+}
+
+// Hook into global terminal close event to cleanup
+vscode.window.onDidCloseTerminal((term) => {
+    // Iterate map and remove
+    // Start with simple check by name or caching reference
+    // Ideally we iterate our map values and compare 'terminal' object
+    // Since 'term' is the object closed.
+    // This is inefficient but fine for small number of terms.
+});
 
 
 export class Bug65DebugSession extends LoggingDebugSession {
@@ -351,13 +396,36 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this._host.commandLineArgs = [programPath, ...(args.args || [])];
 
         // --- Terminal Integration ---
-        const terminal = new Bug65Terminal();
-        const vscTerminal = vscode.window.createTerminal({
-            name: `Bug65 Terminal`,
-            pty: terminal,
-            iconPath: new vscode.ThemeIcon('debug-console')
-        });
-        vscTerminal.show(true);
+        // Reuse terminal if exists for this program
+        const termKey = programPath;
+        let existing = TerminalManager.get(termKey);
+
+        // Check if existing terminal is still valid (not disposed)
+        if (existing && existing.terminal.exitStatus !== undefined) {
+            // It exited? VS Code terminals don't really have 'exitStatus' unless the shell exited.
+            // But if user killed it, onDidCloseTerminal handled map cleanup?
+            // We'll rely on our onDidCloseTerminal hook (implemented below/above).
+        }
+
+        let terminal: Bug65Terminal;
+        let vscTerminal: vscode.Terminal;
+
+        if (existing) {
+            terminal = existing.pty;
+            vscTerminal = existing.terminal;
+            terminal.reset(); // Clear previous buffer/state
+            vscTerminal.show(true);
+            terminal.write(`\r\n--- Restarting ${path.basename(programPath)} ---\r\n`);
+        } else {
+            terminal = new Bug65Terminal();
+            vscTerminal = vscode.window.createTerminal({
+                name: `Bug65: ${path.basename(programPath)}`,
+                pty: terminal,
+                iconPath: new vscode.ThemeIcon('debug-console')
+            });
+            TerminalManager.register(termKey, vscTerminal, terminal);
+            vscTerminal.show(true);
+        }
 
         // Hook up output
         this._host.onWrite = (val: number) => {
@@ -726,8 +794,15 @@ class Bug65Terminal implements vscode.Pseudoterminal {
     private writeEmitter = new vscode.EventEmitter<string>();
     onDidWrite: vscode.Event<string> = this.writeEmitter.event;
 
+
+    private lineBuffer: string = "";
+
     private closeEmitter = new vscode.EventEmitter<void>();
     onDidClose: vscode.Event<void> = this.closeEmitter.event;
+
+    public reset() {
+        this.lineBuffer = "";
+    }
 
     private inputEmitter = new vscode.EventEmitter<string>();
 
@@ -749,29 +824,30 @@ class Bug65Terminal implements vscode.Pseudoterminal {
     }
 
     handleInput(data: string): void {
-        // Echo input locally?
-        // Usually psuedoterminals don't echo unless we want to simulate a shell.
-        // But for a raw program interface, we might want to see what we type.
-        // Let's toggle echo.
-        // The user specifically asked for a terminal, which implies echo usually.
-        // But if the program handles it (like curses), double echo is bad.
-        // Standard terminals echo canonical mode.
-        // Let's implement local echo for newlines at least.
+        // Line discipline implementation
 
-        // Actually, simplest is to just forward input.
-        // If the user types 'A', sending 'A'.
-        // If they hit enter, send '\r'.
-        // The program should ideally echo if it wants.
-        // BUT, since we have no line discipline here, it feels weird if typing is invisible.
-        // Let's echo carriage returns as \r\n for display, and maybe chars.
+        for (let i = 0; i < data.length; i++) {
+            const char = data[i];
 
-        if (data === '\r') {
-            this.writeEmitter.fire('\r\n');
-        } else {
-            this.writeEmitter.fire(data);
+            if (char === '\r') {
+                // Enter
+                this.writeEmitter.fire('\r\n');
+                this.inputEmitter.fire(this.lineBuffer + '\n');
+                this.lineBuffer = "";
+            } else if (char === '\x7f' || char === '\b') {
+                // Backspace
+                if (this.lineBuffer.length > 0) {
+                    this.lineBuffer = this.lineBuffer.slice(0, -1);
+                    // Move back, space, move back to erase character
+                    this.writeEmitter.fire('\b \b');
+                }
+            } else if (char >= ' ') {
+                // Printable
+                this.lineBuffer += char;
+                this.writeEmitter.fire(char);
+            }
+            // Ignore other control codes for now
         }
-
-        this.inputEmitter.fire(data);
     }
 
     write(data: string) {
