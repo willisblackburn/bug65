@@ -468,28 +468,10 @@ export class Cpu6502 implements Cpu {
                 break;
 
             case Opcode.JMP_iax: // 65C02 JMP (Abs,X)
-                // Original logic: "const ptr = this.addrAbsoluteX(); const low = ... etc"
-                // This means 'iax' mode logic in `fetchEffectiveAddress` must resolve the indirect pointer properly.
-                // In my metadata, I mapped 0x7C to 'iax'.
-                // In my `fetchEffectiveAddress` implies standard addressing? 
-                // Ah, `addrAbsoluteX` returns address of pointer? No, it returns `Abs+X`.
-                // The JMP (Abs,X) instruction uses `Abs+X` as the address of the pointer.
-                // So I need to read the pointer.
-                // My `fetchEffectiveAddress` for 'iax' is not implemented yet or needs to be specific.
-                // Re-checking `fetchEffectiveAddress` in step 461:
-                // "case 'iax': return this.addrIndirectX();" -> Wait, `addrIndirectX` is `(ZP,X)`.
-                // JMP 0x7C is JMP (Abs,X).
-                // I need to implement `addrAbsoluteIndirectX` or handle it manually here.
-                // Or fix `fetchEffectiveAddress` to handle `iax` correctly if I used that mode string.
-                // Metadata uses `mode: 'iax'` for 0x7C.
-                // Let's implement logic inline or fix helper later.
-                // For now, inline the logic from original code.
-                {
-                    const ptr = this.addrAbsoluteX();
-                    const low = this.memory.read(ptr);
-                    const high = this.memory.read((ptr + 1) & 0xFFFF);
-                    this.PC = (high << 8) | low;
-                }
+                const ptr = this.addrAbsoluteX();
+                const low = this.memory.read(ptr);
+                const high = this.memory.read((ptr + 1) & 0xFFFF);
+                this.PC = (high << 8) | low;
                 break;
 
             case Opcode.JSR_abs:

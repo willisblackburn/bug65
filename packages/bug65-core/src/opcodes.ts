@@ -186,7 +186,7 @@ export enum Opcode {
 
 export interface OpcodeInfo {
     name: string;
-    mode: 'imp' | 'acc' | 'imm' | 'zp' | 'zpx' | 'zpy' | 'abs' | 'abx' | 'aby' | 'ind' | 'izx' | 'izy' | 'rel' | 'iax' | 'izp' | 'ptr'; // ptr added for some internal flexibility if needed, otherwise stick to standard
+    mode: 'imp' | 'acc' | 'imm' | 'zp' | 'zpx' | 'zpy' | 'abs' | 'abx' | 'aby' | 'ind' | 'izx' | 'izy' | 'rel' | 'iax' | 'izp';
     cycles: number;
     cpu?: CpuType;
     pageBoundCycles?: number; // Extra cycles if page boundary crossed
