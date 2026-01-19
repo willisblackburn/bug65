@@ -320,10 +320,10 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
                 if (size === 2) {
                     val = this._memory.readWord(sym.addr);
-                    valStr = `$${val.toString(16).toUpperCase().padStart(4, '0')} (${val})`;
+                    valStr = `${val} ($${val.toString(16).toUpperCase().padStart(4, '0')})`;
                 } else {
                     val = this._memory.read(sym.addr);
-                    valStr = `$${val.toString(16).toUpperCase().padStart(2, '0')} (${val})`;
+                    valStr = `${val} ($${val.toString(16).toUpperCase().padStart(2, '0')})`;
                 }
 
                 response.body = {
