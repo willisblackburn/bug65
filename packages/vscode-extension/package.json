@@ -56,6 +56,19 @@
                         "name": "Run Bug65 Program",
                         "program": "${workspaceFolder}/program.bin"
                     }
+                ],
+                "configurationSnippets": [
+                    {
+                        "label": "Bug65: Run Program",
+                        "description": "A new configuration for launching a bug65 program",
+                        "body": {
+                            "type": "bug65",
+                            "request": "launch",
+                            "name": "Run Bug65 Program",
+                            "program": "^\"\\${workspaceFolder}/program.bin\"",
+                            "cwd": "^\"\\${workspaceFolder}\""
+                        }
+                    }
                 ]
             }
         ],
