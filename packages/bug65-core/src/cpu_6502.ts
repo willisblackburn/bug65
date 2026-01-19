@@ -18,7 +18,7 @@ export class Cpu6502 implements Cpu {
     public breakpoints: Map<number, Set<string>> = new Map();
     private _cpuType: CpuType = '6502';
 
-    constructor(memory: Memory, cpuType: CpuType = '6502') {
+    public constructor(memory: Memory, cpuType: CpuType = '6502') {
         this.memory = memory;
         this._cpuType = cpuType;
     }
@@ -27,7 +27,7 @@ export class Cpu6502 implements Cpu {
         this._cpuType = type;
     }
 
-    step(ignoreBreakpoint: boolean = false): number {
+    public step(ignoreBreakpoint: boolean = false): number {
         // Check breakpoint before trap
         if (!ignoreBreakpoint && this.breakpoints.has(this.PC)) {
             return 0;
@@ -779,7 +779,7 @@ export class Cpu6502 implements Cpu {
     }
 
     // Helpers
-    reset(): void {
+    public reset(): void {
         this.A = 0;
         this.X = 0;
         this.Y = 0;
@@ -789,7 +789,7 @@ export class Cpu6502 implements Cpu {
         this.cycles = 0;
     }
 
-    getRegisters(): CpuRegisters {
+    public getRegisters(): CpuRegisters {
         return {
             A: this.A,
             X: this.X,

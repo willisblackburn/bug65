@@ -7,7 +7,7 @@ export class Disassembler6502 {
     private debugInfo?: DebugInfo;
     private cpuType: CpuType = '6502';
 
-    constructor(debugInfo?: DebugInfo, cpuType: CpuType = '6502') {
+    public constructor(debugInfo?: DebugInfo, cpuType: CpuType = '6502') {
         this.debugInfo = debugInfo;
         this.cpuType = cpuType;
     }
