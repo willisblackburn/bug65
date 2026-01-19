@@ -41,6 +41,31 @@ This project is structured as a monorepo using npm workspaces.
     npm run compile
     ```
 
+## Developing the Extension
+
+To run and debug the extension source code:
+
+1.  Open the `bug65` workspace in VS Code.
+2.  Run the **"Run Extension"** launch configuration (F5).
+3.  In the new Extension Development Host window that appears, you can open a folder containing your 6502 binary to test it.
+
+For reference, the `launch.json` configuration used to run the extension is:
+
+```json
+{
+    "name": "Run Extension",
+    "type": "extensionHost",
+    "request": "launch",
+    "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension"
+    ],
+    "outFiles": [
+        "${workspaceFolder}/packages/*/out/**/*.js"
+    ],
+    "preLaunchTask": "npm: compile"
+}
+```
+
 ## Usage
 
 1.  Open the `bug65` folder in VS Code.
