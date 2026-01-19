@@ -10,7 +10,7 @@ export function activate(context: vscode.ExtensionContext) {
         console.log(hello());
 
         let disposable = vscode.commands.registerCommand('bug65-debugger.helloWorld', () => {
-            vscode.window.showInformationMessage('Hello World from bug65-vscode-debugger!');
+            vscode.window.showInformationMessage('Hello World from bug65-debugger!');
         });
 
         context.subscriptions.push(disposable);

@@ -46,10 +46,9 @@ This project is structured as a monorepo using npm workspaces.
 
 4.  **Package the extension**:
     ```bash
-    cd packages/bug65-vscode-extension
-    npm run package-vsix
+    npm run package-extension
     ```
-    This creates a `.vsix` file in the directory.
+    This script copies the license and packages the extension into `packages/bug65-vscode-extension/bug65-vscode-extension-0.1.0.vsix`.
 
 ## Usage
 

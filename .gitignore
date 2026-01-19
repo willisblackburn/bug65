@@ -6,6 +6,7 @@ out/
 dist/
 *.vsix
 *.tsbuildinfo
+.staging_extension/
 
 # VS Code
 .vscode/

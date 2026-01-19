@@ -11,7 +11,8 @@
     "test": "npm test --workspaces",
     "compile": "tsc -b",
     "watch": "tsc -b -w",
-    "clean": "rm -rf packages/*/out packages/*/tsconfig.tsbuildinfo tsconfig.tsbuildinfo"
+    "clean": "rm -rf packages/*/out packages/*/dist packages/*/tsconfig.tsbuildinfo tsconfig.tsbuildinfo",
+    "package-extension": "node scripts/package_extension.js"
   },
   "devDependencies": {
     "@types/node": "^25.0.6",

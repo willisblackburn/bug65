@@ -27,7 +27,6 @@ async function main() {
     const ctx = await esbuild.context({
         entryPoints: [
             'src/extension.ts',
-            'src/bug65_debug.ts',
             'src/debug_adapter.ts'
         ],
         bundle: true,
@@ -36,7 +35,7 @@ async function main() {
         sourcemap: !production,
         sourcesContent: false,
         platform: 'node',
-        outdir: 'out',
+        outdir: 'dist',
         external: ['vscode'],
         logLevel: 'silent',
         plugins: [
