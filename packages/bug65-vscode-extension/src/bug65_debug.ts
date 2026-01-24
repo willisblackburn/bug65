@@ -304,24 +304,65 @@ export class Bug65DebugSession extends LoggingDebugSession {
     }
 
     protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
-        const expression = args.expression;
+        const expression = args.expression.trim();
 
-        // Simple variable lookup by name
         if (this._debugInfo) {
-            const sym = this._debugInfo.symbolsByName.get(expression);
+            let name = expression;
+            let mode = 'simple'; // simple, indexed_x, indexed_y, indirect, indirect_y
+
+            // Parse expression
+            const indirectYMatch = expression.match(/^\((.+)\)\s*,\s*[yY]$/);
+            const indirectMatch = expression.match(/^\((.+)\)$/);
+            const indexedXMatch = expression.match(/^(.+)\s*,\s*[xX]$/);
+            const indexedYMatch = expression.match(/^(.+)\s*,\s*[yY]$/);
+
+            if (indirectYMatch) {
+                mode = 'indirect_y';
+                name = indirectYMatch[1].trim();
+            } else if (indirectMatch) {
+                mode = 'indirect';
+                name = indirectMatch[1].trim();
+            } else if (indexedXMatch) {
+                mode = 'indexed_x';
+                name = indexedXMatch[1].trim();
+            } else if (indexedYMatch) {
+                mode = 'indexed_y';
+                name = indexedYMatch[1].trim();
+            }
+
+            const sym = this._debugInfo.symbolsByName.get(name);
             if (sym && sym.addr !== undefined) {
-                // Determine size
-                // If size is present, use it. Default to 1 byte.
-                // If size is 2, read word.
-                const size = sym.size || 1;
+                const regs = this._cpu.getRegisters();
+                let addr = sym.addr;
                 let val = 0;
                 let valStr = "";
 
-                if (size === 2) {
-                    val = this._memory.readWord(sym.addr);
-                    valStr = `${val} ($${val.toString(16).toUpperCase().padStart(4, '0')})`;
+                // Calculate effective address
+                if (mode === 'simple') {
+                    // Original behavior
+                    const size = sym.size || 1;
+                    if (size === 2) {
+                        val = this._memory.readWord(addr);
+                        valStr = `${val} ($${val.toString(16).toUpperCase().padStart(4, '0')})`;
+                    } else {
+                        val = this._memory.read(addr);
+                        valStr = `${val} ($${val.toString(16).toUpperCase().padStart(2, '0')})`;
+                    }
                 } else {
-                    val = this._memory.read(sym.addr);
+                    // For complex modes, we calculate target address and read a byte (as per request implies "show the byte")
+                    if (mode === 'indexed_x') {
+                        addr = (addr + regs.X) & 0xFFFF; // Handle wrap depending on requirement, usually 0xFFFF wrap for absolute indexed
+                    } else if (mode === 'indexed_y') {
+                        addr = (addr + regs.Y) & 0xFFFF;
+                    } else if (mode === 'indirect') {
+                        const ptr = this._memory.readWord(addr);
+                        addr = ptr;
+                    } else if (mode === 'indirect_y') {
+                        const ptr = this._memory.readWord(addr);
+                        addr = (ptr + regs.Y) & 0xFFFF;
+                    }
+
+                    val = this._memory.read(addr);
                     valStr = `${val} ($${val.toString(16).toUpperCase().padStart(2, '0')})`;
                 }
 
@@ -335,8 +376,6 @@ export class Bug65DebugSession extends LoggingDebugSession {
         }
 
         // If not found or no debug info
-        // We do not fail the request necessarily, but we can return null result
-        // But throwing error is standard if not evaluatable
         this.sendErrorResponse(response, 0, `Variable ${expression} not found.`);
     }
 
