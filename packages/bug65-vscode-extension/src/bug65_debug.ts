@@ -731,9 +731,9 @@ export class Bug65DebugSession extends LoggingDebugSession {
     protected variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments): void {
         const id = this._variableHandles.get(args.variablesReference);
         const variables = [];
+        const regs = this._cpu.getRegisters();
 
         if (id === "registers") {
-            const regs = this._cpu.getRegisters();
             const pushReg = (name: string, value: number, length: number) => {
                 variables.push({
                     name,
@@ -782,9 +782,9 @@ export class Bug65DebugSession extends LoggingDebugSession {
                 if (!usedAddresses.has(addr)) {
                     const val = this._memory.read(addr);
                     variables.push({
-                        name: `$${addr.toString(16).toUpperCase()}`,
+                        name: `SP+${ptr - regs.SP} ($${ptr.toString(16).toUpperCase().padStart(2, '0')})`,
                         type: "integer",
-                        value: `$${val.toString(16).toUpperCase()}`,
+                        value: `${val} ($${val.toString(16).toUpperCase().padStart(2, '0')})`,
                         variablesReference: 0
                     });
                 }
