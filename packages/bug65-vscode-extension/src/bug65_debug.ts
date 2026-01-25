@@ -579,18 +579,16 @@ export class Bug65DebugSession extends LoggingDebugSession {
         if (!this._debugInfo) return -1;
         // Map absolute path to debug info file entry
         // Debug info usually has relative paths or basenames.
-        // We might need fuzzy matching.
-        const basename = path.basename(filePath);
         for (const [id, file] of this._debugInfo.files) {
             // Check if name matches basename (hacky but works for flat projects)
             // Or check if filePath ends with file.name
-            if (file.name === basename || (file.name.includes(basename))) { // Very loose matching
+            if (filePath === file.name || filePath.endsWith("/" + file.name)) {
                 return id;
             }
-            if (filePath.endsWith(file.name)) return id;
         }
         return -1;
     }
+
     protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
         response.body = {
             threads: [
