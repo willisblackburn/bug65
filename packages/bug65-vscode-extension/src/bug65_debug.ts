@@ -1,10 +1,9 @@
-
 import * as vscode from 'vscode';
 
 import {
     Logger, logger,
     LoggingDebugSession,
-    InitializedEvent, TerminatedEvent, StoppedEvent, OutputEvent,
+    InitializedEvent, TerminatedEvent, StoppedEvent, OutputEvent, Event,
     Thread, Scope, Source, Handles, Breakpoint, StackFrame
 } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
@@ -193,7 +192,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
         response.body = response.body || {};
         response.body.supportsConfigurationDoneRequest = true;
         response.body.supportsEvaluateForHovers = true;
-        response.body.supportsStepBack = false;
+        response.body.supportsReadMemoryRequest = true;
         this.sendResponse(response);
         this.sendEvent(new InitializedEvent());
     }
@@ -211,7 +210,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
                 this._stepMode = this._stepMode.step(this, pc, opcode);
 
                 if (!this._stepMode) {
-                    this.sendEvent(new StoppedEvent('step', Bug65DebugSession.THREAD_ID));
+                    this.stopAndInvalidate('breakpoint');
                     running = false;
                     break;
                 }
@@ -230,7 +229,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
                 } else {
                     // Breakpoint or Step
                     this._stepMode = undefined;
-                    this.sendEvent(new StoppedEvent('breakpoint', Bug65DebugSession.THREAD_ID));
+                    this.stopAndInvalidate('breakpoint');
                     running = false;
                 }
                 break;
@@ -239,6 +238,17 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
         if (running) {
             setTimeout(() => this.runLoop(false), 1);
+        }
+    }
+
+    private stopAndInvalidate(reason: string): void {
+        this.sendEvent(new StoppedEvent(reason, Bug65DebugSession.THREAD_ID));
+        if (this._debugInfo) {
+            for (const seg of this._debugInfo.segments.values()) {
+                if (seg.type === 'rw') {
+                    this.sendEvent(new Event('memory', { memoryReference: seg.id.toString(), offset: 0, count: seg.size }));
+                }
+            }
         }
     }
 
@@ -306,77 +316,84 @@ export class Bug65DebugSession extends LoggingDebugSession {
     protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
         const expression = args.expression.trim();
 
-        if (this._debugInfo) {
-            let name = expression;
-            let mode = 'simple'; // simple, indexed_x, indexed_y, indirect, indirect_y
+        let name = expression;
+        let mode = 'simple'; // simple, indexed_x, indexed_y, indirect, indirect_y
 
-            // Parse expression
-            const indirectYMatch = expression.match(/^\((.+)\)\s*,\s*[yY]$/);
-            const indirectMatch = expression.match(/^\((.+)\)$/);
-            const indexedXMatch = expression.match(/^(.+)\s*,\s*[xX]$/);
-            const indexedYMatch = expression.match(/^(.+)\s*,\s*[yY]$/);
+        // Parse expression
+        const indirectYMatch = expression.match(/^\((.+)\)\s*,\s*[yY]$/);
+        const indirectMatch = expression.match(/^\((.+)\)$/);
+        const indexedXMatch = expression.match(/^(.+)\s*,\s*[xX]$/);
+        const indexedYMatch = expression.match(/^(.+)\s*,\s*[yY]$/);
 
-            if (indirectYMatch) {
-                mode = 'indirect_y';
-                name = indirectYMatch[1].trim();
-            } else if (indirectMatch) {
-                mode = 'indirect';
-                name = indirectMatch[1].trim();
-            } else if (indexedXMatch) {
-                mode = 'indexed_x';
-                name = indexedXMatch[1].trim();
-            } else if (indexedYMatch) {
-                mode = 'indexed_y';
-                name = indexedYMatch[1].trim();
-            }
+        if (indirectYMatch) {
+            mode = 'indirect_y';
+            name = indirectYMatch[1].trim();
+        } else if (indirectMatch) {
+            mode = 'indirect';
+            name = indirectMatch[1].trim();
+        } else if (indexedXMatch) {
+            mode = 'indexed_x';
+            name = indexedXMatch[1].trim();
+        } else if (indexedYMatch) {
+            mode = 'indexed_y';
+            name = indexedYMatch[1].trim();
+        }
 
+        var addr;
+        var size;
+        if (name.startsWith("$")) {
+            addr = parseInt(name.substring(1), 16);
+            size = 1;
+        } else if (this._debugInfo) {
             const sym = this._debugInfo.symbolsByName.get(name);
             if (sym && sym.addr !== undefined) {
-                const regs = this._cpu.getRegisters();
-                let addr = sym.addr;
-                let val = 0;
-                let valStr = "";
-
-                // Calculate effective address
-                if (mode === 'simple') {
-                    // Original behavior
-                    const size = sym.size || 1;
-                    if (size === 2) {
-                        val = this._memory.readWord(addr);
-                        valStr = `${val} ($${val.toString(16).toUpperCase().padStart(4, '0')})`;
-                    } else {
-                        val = this._memory.read(addr);
-                        valStr = `${val} ($${val.toString(16).toUpperCase().padStart(2, '0')})`;
-                    }
-                } else {
-                    // For complex modes, we calculate target address and read a byte (as per request implies "show the byte")
-                    if (mode === 'indexed_x') {
-                        addr = (addr + regs.X) & 0xFFFF; // Handle wrap depending on requirement, usually 0xFFFF wrap for absolute indexed
-                    } else if (mode === 'indexed_y') {
-                        addr = (addr + regs.Y) & 0xFFFF;
-                    } else if (mode === 'indirect') {
-                        const ptr = this._memory.readWord(addr);
-                        addr = ptr;
-                    } else if (mode === 'indirect_y') {
-                        const ptr = this._memory.readWord(addr);
-                        addr = (ptr + regs.Y) & 0xFFFF;
-                    }
-
-                    val = this._memory.read(addr);
-                    valStr = `${val} ($${val.toString(16).toUpperCase().padStart(2, '0')})`;
-                }
-
-                response.body = {
-                    result: valStr,
-                    variablesReference: 0
-                };
-                this.sendResponse(response);
-                return;
+                addr = sym.addr;
+                size = sym.size || 1;
             }
         }
 
         // If not found or no debug info
-        this.sendErrorResponse(response, 0, `Variable ${expression} not found.`);
+        if (addr === undefined) {
+            this.sendErrorResponse(response, 0, `Variable ${expression} not found.`);
+            return;
+        }
+
+        let val = 0;
+        let valStr = "";
+        const regs = this._cpu.getRegisters();
+
+        // Calculate effective address
+        if (mode === 'simple') {
+            if (size === 2) {
+                val = this._memory.readWord(addr);
+                valStr = `${val} ($${val.toString(16).toUpperCase().padStart(4, '0')})`;
+            } else {
+                val = this._memory.read(addr);
+                valStr = `${val} ($${val.toString(16).toUpperCase().padStart(2, '0')})`;
+            }
+        } else {
+            // For complex modes, we calculate target address and read a byte (as per request implies "show the byte")
+            if (mode === 'indexed_x') {
+                addr = (addr + regs.X) & 0xFFFF; // Handle wrap depending on requirement, usually 0xFFFF wrap for absolute indexed
+            } else if (mode === 'indexed_y') {
+                addr = (addr + regs.Y) & 0xFFFF;
+            } else if (mode === 'indirect') {
+                const ptr = this._memory.readWord(addr);
+                addr = ptr;
+            } else if (mode === 'indirect_y') {
+                const ptr = this._memory.readWord(addr);
+                addr = (ptr + regs.Y) & 0xFFFF;
+            }
+
+            val = this._memory.read(addr);
+            valStr = `${val} ($${val.toString(16).toUpperCase().padStart(2, '0')})`;
+        }
+
+        response.body = {
+            result: valStr,
+            variablesReference: 0
+        };
+        this.sendResponse(response);
     }
 
     private _programDir: string = "";
@@ -512,8 +529,6 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this.runLoop(true);
         this.sendResponse(response);
     }
-
-
 
     protected setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): void {
         const path = args.source.path as string;
@@ -717,6 +732,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
         const frameId = args.frameId;
         const scopes = new Array<Scope>();
         scopes.push(new Scope("Registers", this._variableHandles.create("registers"), false));
+        scopes.push(new Scope("Segments", this._variableHandles.create("segs"), false));
         scopes.push(new Scope("Locals", this._variableHandles.create("loc"), false));
         scopes.push(new Scope("Stack", this._variableHandles.create("stack"), false));
 
@@ -767,6 +783,24 @@ export class Bug65DebugSession extends LoggingDebugSession {
                 value: `${flagsStr} ($${s.toString(16).toUpperCase().padStart(2, '0')})`,
                 variablesReference: 0
             });
+
+        } else if (id === "segs") {
+            if (this._debugInfo) {
+                let segments = Array.from(this._debugInfo.segments.values()).sort((a, b) => {
+                    return a.start - b.start;
+                });
+                for (const seg of segments) {
+                    if (seg.size > 0) {
+                        variables.push({
+                            name: seg.name,
+                            type: "segment",
+                            value: `$${seg.start.toString(16).toUpperCase().padStart(4, '0')}-$${(seg.start + seg.size -1).toString(16).toUpperCase().padStart(4, '0')}`,
+                            variablesReference: 0,
+                            memoryReference: seg.id.toString()
+                        });
+                    }
+                }
+            }
 
         } else if (id === "stack") {
             const sp = this._cpu.getRegisters().SP;
@@ -854,7 +888,23 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this.sendResponse(response);
     }
 
-
+    protected readMemoryRequest(response: DebugProtocol.ReadMemoryResponse, args: DebugProtocol.ReadMemoryArguments, request?: DebugProtocol.Request): void {
+        if (this._debugInfo) {
+            let seg = this._debugInfo.segments.get(parseInt(args.memoryReference));
+            if (seg) {
+                let addr = seg.start + (args.offset ?? 0);
+                let bytes = new Uint8Array(args.count); 
+                for (let i = 0; i < args.count && addr + i < 0x10000; i++) {
+                    bytes[i] = this._memory.read(addr + i);
+                }
+                response.body = {
+                    address: `0x${addr.toString(16).toUpperCase().padStart(4, '0')}`,
+                    data: Buffer.from(bytes).toString('base64')
+                };
+            }
+        } 
+        this.sendResponse(response);
+    }
 }
 
 class Bug65Terminal implements vscode.Pseudoterminal {

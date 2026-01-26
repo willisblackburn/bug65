@@ -43,6 +43,7 @@ export interface SegmentInfo {
     name: string;
     start: number;
     size: number;
+    type: string;
 }
 
 export interface ModuleInfo {
@@ -370,7 +371,8 @@ export class DebugInfoParser {
                             id,
                             name: props.get('name')!.replace(/"/g, ''),
                             start: this.parseNumber(props.get('start')!),
-                            size: this.parseNumber(props.get('size')!)
+                            size: this.parseNumber(props.get('size')!),
+                            type: props.get('type')!
                         });
                     }
                     break;
