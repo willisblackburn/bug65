@@ -18,7 +18,9 @@
 
 *   **Command Line Interface (`bug65-cli`)**:
     *   Drop-in replacement for `sim65`.
-    
+
+![bug65 screenshot](bug65_screen_shot.png)
+
 ## Prerequisites
 
 *   [Node.js](https://nodejs.org/) (version 16 or higher)
