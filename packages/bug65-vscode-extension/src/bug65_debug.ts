@@ -11,16 +11,6 @@ import { Cpu6502, Memory, SimpleMemory, CpuRegisters, Bug65Host, DebugInfo, Debu
 import * as fs from 'fs';
 import * as path from 'path';
 
-
-// Clean up terminals on close
-vscode.window.onDidCloseTerminal(term => {
-    // We can't access TerminalManager class easily if it's protected inside the module scope but not exported?
-    // It is in module scope.
-    // Try to find key
-    // We need to iterate the entries
-    // For now we will implement cleanup logic later or make TerminalManager expose a collection
-});
-
 interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
     program: string;
     stopOnEntry?: boolean;
@@ -119,13 +109,6 @@ class TerminalManager {
 
     public static register(key: string, term: vscode.Terminal, pty: Bug65Terminal) {
         this.terminals.set(key, { terminal: term, pty: pty });
-
-        // Listen for close to cleanup
-        // Note: VS Code API close event is global, but we can't easily hook it per instance here 
-        // without passing the disposable. 
-        // Actually, we can rely on pty.onClose if we trigger it? 
-        // No, pty.onClose is when the pty itself closes (e.g. process exit).
-        // VS Code terminal close is UI action.
     }
 
     // Call this if we detect the terminal is closed
@@ -133,16 +116,6 @@ class TerminalManager {
         this.terminals.delete(key);
     }
 }
-
-// Hook into global terminal close event to cleanup
-vscode.window.onDidCloseTerminal((term) => {
-    // Iterate map and remove
-    // Start with simple check by name or caching reference
-    // Ideally we iterate our map values and compare 'terminal' object
-    // Since 'term' is the object closed.
-    // This is inefficient but fine for small number of terms.
-});
-
 
 export class Bug65DebugSession extends LoggingDebugSession {
 
@@ -572,38 +545,6 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this.sendResponse(response);
     }
 
-    private _debugInfo: DebugInfo | undefined;
-
-    private loadDebugInfo(programPath: string) {
-        const dbgPath = DebugInfoParser.resolveDebugFile(programPath);
-        if (dbgPath) {
-            try {
-                const debugObj = DebugInfoParser.parse(fs.readFileSync(dbgPath, 'utf8'));
-                this._debugInfo = debugObj;
-                this._disassembler = new Disassembler6502(this._debugInfo, this._cpuType);
-                this.sendEvent(new OutputEvent(`[bug65] Loaded debug info: ${dbgPath}\n`, 'console'));
-            } catch (e) {
-                this.sendEvent(new OutputEvent(`[bug65] Failed to parse debug info: ${e}\n`, 'stderr'));
-            }
-        } else {
-            this._disassembler = new Disassembler6502(undefined, this._cpuType);
-        }
-    }
-
-    private getFileId(filePath: string): number {
-        if (!this._debugInfo) return -1;
-        // Map absolute path to debug info file entry
-        // Debug info usually has relative paths or basenames.
-        for (const [id, file] of this._debugInfo.files) {
-            // Check if name matches basename (hacky but works for flat projects)
-            // Or check if filePath ends with file.name
-            if (filePath === file.name || filePath.endsWith("/" + file.name)) {
-                return id;
-            }
-        }
-        return -1;
-    }
-
     protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
         response.body = {
             threads: [
@@ -904,6 +845,38 @@ export class Bug65DebugSession extends LoggingDebugSession {
             }
         } 
         this.sendResponse(response);
+    }
+
+    private _debugInfo: DebugInfo | undefined;
+
+    private loadDebugInfo(programPath: string) {
+        const dbgPath = DebugInfoParser.resolveDebugFile(programPath);
+        if (dbgPath) {
+            try {
+                const debugObj = DebugInfoParser.parse(fs.readFileSync(dbgPath, 'utf8'));
+                this._debugInfo = debugObj;
+                this._disassembler = new Disassembler6502(this._debugInfo, this._cpuType);
+                this.sendEvent(new OutputEvent(`[bug65] Loaded debug info: ${dbgPath}\n`, 'console'));
+            } catch (e) {
+                this.sendEvent(new OutputEvent(`[bug65] Failed to parse debug info: ${e}\n`, 'stderr'));
+            }
+        } else {
+            this._disassembler = new Disassembler6502(undefined, this._cpuType);
+        }
+    }
+
+    private getFileId(filePath: string): number {
+        if (!this._debugInfo) return -1;
+        // Map absolute path to debug info file entry
+        // Debug info usually has relative paths or basenames.
+        for (const [id, file] of this._debugInfo.files) {
+            // Check if name matches basename (hacky but works for flat projects)
+            // Or check if filePath ends with file.name
+            if (filePath === file.name || filePath.endsWith("/" + file.name)) {
+                return id;
+            }
+        }
+        return -1;
     }
 }
 
