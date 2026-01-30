@@ -128,6 +128,8 @@ export class Bug65DebugSession extends LoggingDebugSession {
     private _stopOnEntry = false;
 
     private _stepMode: StepMode | undefined;
+    private _isTerminated = false;
+    private _inputDisposable: vscode.Disposable | undefined;
 
     private _cpuType: CpuType = '6502';
 
@@ -175,6 +177,10 @@ export class Bug65DebugSession extends LoggingDebugSession {
         let running = true;
 
         for (let i = 0; i < batch; i++) {
+            if (this._isTerminated) {
+                running = false;
+                break;
+            }
             const pc = this._cpu.getRegisters().PC;
             const opcode = this._memory.read(pc); // Peek opcode
 
@@ -455,7 +461,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
         };
 
         // Hook up input
-        terminal.onInput((data) => {
+        this._inputDisposable = terminal.onInput((data) => {
             const bytes = new Uint8Array(data.length);
             for (let i = 0; i < data.length; i++) {
                 bytes[i] = data.charCodeAt(i);
@@ -486,6 +492,15 @@ export class Bug65DebugSession extends LoggingDebugSession {
         } else {
             // Defer until configurationDone
         }
+    }
+
+    protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments, request?: DebugProtocol.Request): void {
+        this._isTerminated = true;
+        if (this._inputDisposable) {
+            this._inputDisposable.dispose();
+            this._inputDisposable = undefined;
+        }
+        this.sendResponse(response);
     }
 
     protected configurationDoneRequest(response: DebugProtocol.ConfigurationDoneResponse, args: DebugProtocol.ConfigurationDoneArguments): void {
@@ -897,8 +912,8 @@ class Bug65Terminal implements vscode.Pseudoterminal {
     private inputEmitter = new vscode.EventEmitter<string>();
 
     // Custom event to subscribe to input
-    public onInput(listener: (data: string) => void) {
-        this.inputEmitter.event(listener);
+    public onInput(listener: (data: string) => void): vscode.Disposable {
+        return this.inputEmitter.event(listener);
     }
 
     public onClose(listener: () => void) {
