@@ -99,23 +99,6 @@ class StepOutMode implements StepMode {
     }
 }
 
-// Manager to reuse terminals
-class TerminalManager {
-    private static terminals = new Map<string, { terminal: vscode.Terminal, pty: Bug65Terminal }>();
-
-    public static get(key: string): { terminal: vscode.Terminal, pty: Bug65Terminal } | undefined {
-        return this.terminals.get(key);
-    }
-
-    public static register(key: string, term: vscode.Terminal, pty: Bug65Terminal) {
-        this.terminals.set(key, { terminal: term, pty: pty });
-    }
-
-    // Call this if we detect the terminal is closed
-    public static remove(key: string) {
-        this.terminals.delete(key);
-    }
-}
 
 export class Bug65DebugSession extends LoggingDebugSession {
 
@@ -136,13 +119,23 @@ export class Bug65DebugSession extends LoggingDebugSession {
     private _host: Bug65Host;
 
     private sessionName: string;
+    private terminal: Bug65Terminal | undefined; // Optional for standalone mode
 
-    constructor(sessionNameOrLegacy?: string | boolean) {
-        super("bug65-debug.txt");
-        if (typeof sessionNameOrLegacy === 'string') {
-            this.sessionName = sessionNameOrLegacy;
+    // debuggerLinesAndColumnsStartAt1 and isServer are properties of DebugSession, but we can't access them directly in constructor
+    // before super(). The default DebugSession constructor takes them as optional.
+    constructor(debuggerLinesAndColumnsStartAt1?: boolean, isServer?: boolean, sessionName?: string, terminal?: Bug65Terminal) {
+        super("bug65-debug.txt", debuggerLinesAndColumnsStartAt1, isServer);
+
+        if (sessionName) {
+            this.sessionName = sessionName;
         } else {
             this.sessionName = "Standalone";
+        }
+
+        if (terminal) {
+            this.terminal = terminal;
+        } else {
+            this.terminal = undefined;
         }
 
         this._memory = new SimpleMemory();
@@ -436,37 +429,19 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this._host.commandLineArgs = [programPath, ...(args.args || [])];
 
         // --- Terminal Integration ---
-        // Reuse terminal if exists for this session name
-        let termKey = this.sessionName;
-        let termName = `bug65: ${this.sessionName}`;
-
-        let existing = TerminalManager.get(termKey);
-
-        // Check if existing terminal is still valid (not disposed)
-        if (existing && existing.terminal.exitStatus !== undefined) {
-            // It exited? VS Code terminals don't really have 'exitStatus' unless the shell exited.
-            // But if user killed it, onDidCloseTerminal handled map cleanup?
-            // We'll rely on our onDidCloseTerminal hook (implemented below/above).
+        // Use injected terminal
+        const terminal = this.terminal;
+        
+        if (!terminal) {
+            // Fallback for standalone tests or if not provided
+            this.sendEvent(new OutputEvent(`[bug65] Warning: No terminal provided for session. Input/Output disabled.\n`, 'stderr'));
+            this.sendResponse(response);
+            return;
         }
 
-        let terminal: Bug65Terminal;
-        let vscTerminal: vscode.Terminal;
-
-        if (existing) {
-            terminal = existing.pty;
-            vscTerminal = existing.terminal;
-            terminal.reset(); // Clear previous buffer/state
-            vscTerminal.show(true);
-        } else {
-            terminal = new Bug65Terminal();
-            vscTerminal = vscode.window.createTerminal({
-                name: termName,
-                pty: terminal,
-                iconPath: new vscode.ThemeIcon('debug-console')
-            });
-            TerminalManager.register(termKey, vscTerminal, terminal);
-            vscTerminal.show(true);
-        }
+        terminal.reset();
+        
+        // Hook up output
 
         // Hook up output
         this._host.onWrite = (val: number) => {
@@ -910,7 +885,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
     }
 }
 
-class Bug65Terminal implements vscode.Pseudoterminal {
+export class Bug65Terminal implements vscode.Pseudoterminal {
     private writeEmitter = new vscode.EventEmitter<string>();
     onDidWrite: vscode.Event<string> = this.writeEmitter.event;
 

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { hello } from 'bug65-core';
-import { Bug65DebugSession } from './bug65_debug';
+import { Bug65DebugSession, Bug65Terminal } from './bug65_debug';
 
 console.log('[bug65] Extension module loading...');
 
@@ -28,10 +28,44 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 class Bug65DebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
+    
+    // Map session name -> Terminal pair
+    private terminalRegistry = new Map<string, { terminal: vscode.Terminal, pty: Bug65Terminal }>();
+
     createDebugAdapterDescriptor(session: vscode.DebugSession, executable: vscode.DebugAdapterExecutable | undefined): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
         console.log(`[bug65] createDebugAdapterDescriptor called for session: ${session.name}`);
+
+        let termEntry = this.terminalRegistry.get(session.name);
+
+        // Check availability and closed status
+        if (termEntry) {
+             if (termEntry.terminal.exitStatus !== undefined) {
+                 // Terminated (exit code set)
+                 termEntry = undefined;
+             }
+        }
+
+        if (!termEntry) {
+            const pty = new Bug65Terminal();
+            const terminal = vscode.window.createTerminal({
+                name: `bug65: ${session.name}`,
+                pty: pty,
+                iconPath: new vscode.ThemeIcon('debug-console')
+            });
+            termEntry = { terminal, pty };
+            this.terminalRegistry.set(session.name, termEntry);
+            
+            // Clean up registry when terminal is closed by user
+            // This is a backup; exitStatus check above is the primary way for reuse logic.
+            // But we don't want the map to grow forever.
+            // Note: We can't easily hook onDidCloseTerminal for *specific* terminal here without global listener.
+            // The global listener approach can be cleaner, but we'll lazy-clean in create for now.
+        }
+
+        termEntry.terminal.show(true);
+
         // Always use inline debug adapter for development/debugging simplicity
-        return new vscode.DebugAdapterInlineImplementation(new Bug65DebugSession(session.name));
+        return new vscode.DebugAdapterInlineImplementation(new Bug65DebugSession(undefined, undefined, session.name, termEntry.pty));
     }
 }
 
