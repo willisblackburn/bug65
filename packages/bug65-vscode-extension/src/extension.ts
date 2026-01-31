@@ -29,9 +29,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 class Bug65DebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
     createDebugAdapterDescriptor(session: vscode.DebugSession, executable: vscode.DebugAdapterExecutable | undefined): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
-        console.log('[bug65] createDebugAdapterDescriptor called.');
+        console.log(`[bug65] createDebugAdapterDescriptor called for session: ${session.name}`);
         // Always use inline debug adapter for development/debugging simplicity
-        return new vscode.DebugAdapterInlineImplementation(new Bug65DebugSession());
+        return new vscode.DebugAdapterInlineImplementation(new Bug65DebugSession(session.name));
     }
 }
 

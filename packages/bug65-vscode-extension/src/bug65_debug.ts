@@ -135,8 +135,15 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
     private _host: Bug65Host;
 
-    constructor() {
+    private sessionName: string;
+
+    constructor(sessionNameOrLegacy?: string | boolean) {
         super("bug65-debug.txt");
+        if (typeof sessionNameOrLegacy === 'string') {
+            this.sessionName = sessionNameOrLegacy;
+        } else {
+            this.sessionName = "Standalone";
+        }
 
         this._memory = new SimpleMemory();
         this._cpu = new Cpu6502(this._memory);
@@ -377,13 +384,17 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
     private _programDir: string = "";
     private _cwd: string = "";
+    private _programPath: string = "";
 
     protected async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments) {
         logger.setup(Logger.LogLevel.Verbose, false);
         this.sendEvent(new OutputEvent(`[bug65] Launching program: ${args.program}\n`, 'console'));
 
         const programPath = args.program;
+        this._programPath = programPath;
         this._programDir = path.dirname(programPath);
+
+        this.sendEvent(new OutputEvent(`[bug65] Starting Session: "${this.sessionName}"\n`, 'console'));
 
         // Use args.cwd from configurationAttributes (needs update in LaunchRequestArguments interface)
         // Note: args is LaunchRequestArguments which extends Map<string, any>.
@@ -425,8 +436,10 @@ export class Bug65DebugSession extends LoggingDebugSession {
         this._host.commandLineArgs = [programPath, ...(args.args || [])];
 
         // --- Terminal Integration ---
-        // Reuse terminal if exists for this program
-        const termKey = programPath;
+        // Reuse terminal if exists for this session name
+        let termKey = this.sessionName;
+        let termName = `bug65: ${this.sessionName}`;
+
         let existing = TerminalManager.get(termKey);
 
         // Check if existing terminal is still valid (not disposed)
@@ -447,7 +460,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
         } else {
             terminal = new Bug65Terminal();
             vscTerminal = vscode.window.createTerminal({
-                name: `bug65: ${path.basename(programPath)}`,
+                name: termName,
                 pty: terminal,
                 iconPath: new vscode.ThemeIcon('debug-console')
             });
@@ -495,11 +508,13 @@ export class Bug65DebugSession extends LoggingDebugSession {
     }
 
     protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments, request?: DebugProtocol.Request): void {
+        this.sendEvent(new OutputEvent(`[bug65] Ending Session: "${this.sessionName}"\n`, 'console'));
         this._isTerminated = true;
         if (this._inputDisposable) {
             this._inputDisposable.dispose();
             this._inputDisposable = undefined;
         }
+
         this.sendResponse(response);
     }
 
