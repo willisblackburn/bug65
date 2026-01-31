@@ -300,7 +300,15 @@ export class Bug65DebugSession extends LoggingDebugSession {
     }
 
     protected evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
-        const expression = args.expression.trim();
+        let expression = args.expression.trim();
+
+        // Check for size override #N
+        let forcedSize: number | undefined;
+        const sizeMatch = expression.match(/^(.*)#(\d+)$/);
+        if (sizeMatch) {
+            expression = sizeMatch[1].trim();
+            forcedSize = parseInt(sizeMatch[2], 10);
+        }
 
         let name = expression;
         let mode = 'simple'; // simple, indexed_x, indexed_y, indirect, indirect_y
@@ -326,15 +334,16 @@ export class Bug65DebugSession extends LoggingDebugSession {
         }
 
         var addr;
-        var size;
+        var symbolSize = 1;
+
         if (name.startsWith("$")) {
             addr = parseInt(name.substring(1), 16);
-            size = 1;
+            symbolSize = 1;
         } else if (this._debugInfo) {
             const sym = this._debugInfo.symbolsByName.get(name);
             if (sym && sym.addr !== undefined) {
                 addr = sym.addr;
-                size = sym.size || 1;
+                symbolSize = sym.size || 1;
             }
         }
 
@@ -344,35 +353,53 @@ export class Bug65DebugSession extends LoggingDebugSession {
             return;
         }
 
-        let val = 0;
         let valStr = "";
         const regs = this._cpu.getRegisters();
+        let finalAddr = addr;
 
-        // Calculate effective address
+        // Calculate final effective address
         if (mode === 'simple') {
-            if (size === 2) {
-                val = this._memory.readWord(addr);
+            finalAddr = addr;
+        } else if (mode === 'indexed_x') {
+            finalAddr = (addr + regs.X) & 0xFFFF;
+        } else if (mode === 'indexed_y') {
+            finalAddr = (addr + regs.Y) & 0xFFFF;
+        } else if (mode === 'indirect') {
+            const ptr = this._memory.readWord(addr);
+            finalAddr = ptr;
+        } else if (mode === 'indirect_y') {
+            const ptr = this._memory.readWord(addr);
+            finalAddr = (ptr + regs.Y) & 0xFFFF;
+        }
+
+        // Read and Format
+        if (forcedSize !== undefined) {
+            // Raw dump of N bytes
+            let hexStr = "";
+            let charsStr = "";
+            for (let i = 0; i < forcedSize; i++) {
+                const b = this._memory.read((finalAddr + i) & 0xFFFF);
+                if (i > 0) {
+                    hexStr += " ";
+                }
+                hexStr += b.toString(16).toUpperCase().padStart(2, '0');
+                charsStr += b < 33 || b > 126 ? '.' : String.fromCharCode(b);
+            }
+            valStr = `$${finalAddr.toString(16).toUpperCase().padStart(4, '0')}: ${hexStr} ${charsStr}`;
+        } else {
+            // Default formatting based on symbol size (or byte if unknown)
+            // But if it's an addressing mode, we usually imply reading a byte unless it is a pointer?
+            // Existing logic implied: simple -> check size; complex -> read byte.
+            
+            // Let's stick to: if simple mode and symbol has size 2, read word.
+            // Else read byte.
+            if (mode === 'simple' && symbolSize === 2) {
+                const val = this._memory.readWord(finalAddr);
                 valStr = `${val} ($${val.toString(16).toUpperCase().padStart(4, '0')})`;
             } else {
-                val = this._memory.read(addr);
+                const val = this._memory.read(finalAddr);
                 valStr = `${val} ($${val.toString(16).toUpperCase().padStart(2, '0')})`;
             }
-        } else {
-            // For complex modes, we calculate target address and read a byte (as per request implies "show the byte")
-            if (mode === 'indexed_x') {
-                addr = (addr + regs.X) & 0xFFFF; // Handle wrap depending on requirement, usually 0xFFFF wrap for absolute indexed
-            } else if (mode === 'indexed_y') {
-                addr = (addr + regs.Y) & 0xFFFF;
-            } else if (mode === 'indirect') {
-                const ptr = this._memory.readWord(addr);
-                addr = ptr;
-            } else if (mode === 'indirect_y') {
-                const ptr = this._memory.readWord(addr);
-                addr = (ptr + regs.Y) & 0xFFFF;
-            }
-
-            val = this._memory.read(addr);
-            valStr = `${val} ($${val.toString(16).toUpperCase().padStart(2, '0')})`;
         }
 
         response.body = {
