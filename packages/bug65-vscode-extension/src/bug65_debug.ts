@@ -112,6 +112,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
     private _stepMode: StepMode | undefined;
     private _isTerminated = false;
+    private _breakRequested = false;
     private _inputDisposable: vscode.Disposable | undefined;
 
     private _cpuType: CpuType = '6502';
@@ -178,6 +179,12 @@ export class Bug65DebugSession extends LoggingDebugSession {
 
         for (let i = 0; i < batch; i++) {
             if (this._isTerminated) {
+                running = false;
+                break;
+            }
+            if (this._breakRequested) {
+                this._breakRequested = false;
+                this.stopAndInvalidate('pause');
                 running = false;
                 break;
             }
@@ -480,6 +487,11 @@ export class Bug65DebugSession extends LoggingDebugSession {
         } else {
             // Defer until configurationDone
         }
+    }
+
+    protected pauseRequest(response: DebugProtocol.PauseResponse, args: DebugProtocol.PauseArguments, request?: DebugProtocol.Request): void {
+        this._breakRequested = true;
+        this.sendResponse(response);
     }
 
     protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments, request?: DebugProtocol.Request): void {
