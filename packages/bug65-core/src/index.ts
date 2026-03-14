@@ -9,3 +9,4 @@ export function hello() {
     return "Hello from sim65-core";
 }
 export * from './loader';
+export * from './profiler';

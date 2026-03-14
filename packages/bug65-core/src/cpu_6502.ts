@@ -1,6 +1,7 @@
 import { Cpu, CpuRegisters, Flags, CpuType } from './cpu_interface';
 import { Memory } from './memory';
 import { OPCODES, Opcode } from './opcodes';
+import { Profiler, SimpleProfiler } from './profiler';
 
 export class Cpu6502 implements Cpu {
     protected memory: Memory;
@@ -12,11 +13,10 @@ export class Cpu6502 implements Cpu {
     protected PC: number = 0;
     protected Status: number = Flags.Unused | Flags.InterruptDisable;
 
-    protected cycles: number = 0;
-
     public onTrap: ((pc: number) => boolean) | undefined;
     public breakpoints: Map<number, Set<string>> = new Map();
     private _cpuType: CpuType = '6502';
+    public profiler: Profiler = new SimpleProfiler();
 
     public constructor(memory: Memory, cpuType: CpuType = '6502') {
         this.memory = memory;
@@ -40,11 +40,14 @@ export class Cpu6502 implements Cpu {
         }
 
         const opcode = this.memory.read(this.PC++);
-        const startCycles = this.cycles;
+        const startCycles = this.profiler.totalCycles;
 
         this.executeOpcode(opcode);
 
-        return this.cycles - startCycles;
+        const instructionCycles = this.profiler.totalCycles - startCycles;
+        this.profiler.record(opcode, instructionCycles, this.SP, this.PC);
+
+        return instructionCycles;
     }
 
     protected executeOpcode(opcode: number): void {
@@ -59,7 +62,7 @@ export class Cpu6502 implements Cpu {
         }
 
         // Base cycles from metadata
-        this.cycles += entry.cycles;
+        this.profiler.totalCycles += entry.cycles;
 
         const effectiveAddr = this.fetchEffectiveAddress(entry.mode);
 
@@ -786,7 +789,7 @@ export class Cpu6502 implements Cpu {
         this.SP = 0xFF;
         this.Status = Flags.Unused | Flags.InterruptDisable;
         this.PC = this.memory.readWord(0xFFFC);
-        this.cycles = 0;
+        this.profiler.reset();
     }
 
     public getRegisters(): CpuRegisters {
@@ -843,19 +846,19 @@ export class Cpu6502 implements Cpu {
     }
 
     protected branch(condition: boolean, offsetAddr: number): void {
-        this.cycles += 2;
+        this.profiler.totalCycles += 2;
         const offset = this.memory.read(offsetAddr);
         // Value is unsigned 0-255, treat as signed integer
         const signedOffset = offset > 127 ? offset - 256 : offset;
 
         if (condition) {
-            this.cycles += 1;
+            this.profiler.totalCycles += 1;
             const oldPC = this.PC;
             this.PC = (this.PC + signedOffset) & 0xFFFF;
 
             // Check page cross
             if ((oldPC & 0xFF00) !== (this.PC & 0xFF00)) {
-                this.cycles += 1;
+                this.profiler.totalCycles += 1;
             }
         }
     }

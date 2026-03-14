@@ -1,11 +1,11 @@
 
-import { Cpu6502, Memory, SimpleMemory, Flags, Bug65Host, Disassembler6502, DebugInfo, DebugInfoParser, ProgramLoader, CpuType } from 'bug65-core';
+import { Cpu6502, Memory, SimpleMemory, Flags, Bug65Host, Disassembler6502, DebugInfo, DebugInfoParser, ProgramLoader, CpuType, FunctionalProfiler } from 'bug65-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
 function printHelp() {
-    console.log("Usage: bug65 [--trace|-t] [--cpu <type>] <program.bin> [start_address_hex]");
-    console.log("Example: bug65 --trace --cpu 65C02 program.bin 0200");
+    console.log("Usage: bug65 [--trace|-t] [--profile] [--cpu <type>] <program.bin> [start_address_hex]");
+    console.log("Example: bug65 --trace --profile --cpu 65C02 program.bin 0200");
 }
 
 function main() {
@@ -15,6 +15,7 @@ function main() {
     let programPath: string | null = null;
     let specifiedLoadAddr: number | null = null;
     let specifiedCpuType: CpuType | null = null;
+    let profileMode: boolean = false;
 
     // Parse args
     // Parse args
@@ -33,6 +34,8 @@ function main() {
                 console.error(`Invalid trace mode: ${mode}`);
                 process.exit(1);
             }
+        } else if (args[i] === '--profile') {
+            profileMode = true;
         } else if (args[i] === '--dbgfile') {
             if (i + 1 < args.length) {
                 dbgFileArg = args[++i];
@@ -138,6 +141,15 @@ function main() {
 
 
         host.onExit = (code) => {
+            if (profileMode && cpu && cpu.profiler.kind === 'functional') {
+                const report = (cpu.profiler as FunctionalProfiler).getReport();
+                process.stdout.write("\nProfiling Report (Function, Cycles):\n");
+                // Sort by cycles descending
+                const sorted = Array.from(report.entries()).sort((a, b) => b[1] - a[1]);
+                for (const [name, cycles] of sorted) {
+                    process.stdout.write(`${name},${cycles}\n`);
+                }
+            }
             process.exit(code);
         };
 
@@ -179,6 +191,10 @@ function main() {
             console.error(`  Loaded ${debugInfo.symbols.size} symbols, ${debugInfo.lines.length} lines.`);
         } else {
             console.error("No debug info file found.");
+        }
+
+        if (profileMode) {
+            cpu.profiler = new FunctionalProfiler(debugInfo);
         }
 
         const disassembler = new Disassembler6502(debugInfo, effectiveCpuType);
@@ -263,7 +279,7 @@ function main() {
 
             try {
                 // Inner sync loop for performance
-                while (cycles < batchSize) {
+                while (cycles < batchSize && running) {
                     if (traceMode !== 'off' && cpu) {
                         const regs = cpu.getRegisters();
 
