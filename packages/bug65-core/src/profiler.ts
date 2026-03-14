@@ -3,7 +3,8 @@ import { Opcode } from './opcodes';
 
 export interface ProfileEntry {
     sp: number;
-    name: string;
+    symbol: string;
+    cheapLabel?: string;
 }
 
 export const DEFAULT_FUNCTION = "(startup)";
@@ -11,8 +12,8 @@ export const DEFAULT_FUNCTION = "(startup)";
 export interface Profiler {
     totalCycles: number;
     record(opcode: number, cycles: number, currentSP: number, currentPC: number): void;
+    printReport(): void;
     reset(): void;
-    kind?: string;
 }
 
 export class SimpleProfiler implements Profiler {
@@ -22,6 +23,10 @@ export class SimpleProfiler implements Profiler {
         this.totalCycles += cycles;
     }
 
+    public printReport(): void {
+        process.stdout.write("Total cycles: " + this.totalCycles + "\n")
+    }
+
     public reset() {
         this.totalCycles = 0;
     }
@@ -29,7 +34,6 @@ export class SimpleProfiler implements Profiler {
 
 export class FunctionalProfiler implements Profiler {
     public totalCycles: number = 0;
-    public kind = "functional";
     private stack: ProfileEntry[] = [];
     private cycleCounts: Map<string, number> = new Map();
     private debugInfo: DebugInfo | undefined;
@@ -53,7 +57,7 @@ export class FunctionalProfiler implements Profiler {
         if (this.stack.length === 0) {
             this.cycleCounts.set(DEFAULT_FUNCTION, (this.cycleCounts.get(DEFAULT_FUNCTION) || 0) + cycles);
         } else {
-            const currentPath = this.stack.map(e => e.name).join('/');
+            const currentPath = this.stack.map(e => e.cheapLabel ? `${e.symbol}${e.cheapLabel}` : e.symbol).join('/');
             this.cycleCounts.set(currentPath, (this.cycleCounts.get(currentPath) || 0) + cycles);
         }
 
@@ -66,23 +70,63 @@ export class FunctionalProfiler implements Profiler {
                     funcName = sym.name;
                 }
             }
-            this.stack.push({ sp: currentSP, name: funcName });
+            this.stack.push({ sp: currentSP, symbol: funcName });
         } else {
             // 4. Handle tail-calls and RTS-to-function transitions
             // If the stack is empty and we hit a symbol, push it as a root.
             // If we are already at the same or deeper stack level, but PC points to a different function,
-            // replace the current function name.
+            // replace the current function name or set cheapLabel.
             const symbol = this.debugInfo?.getSymbolForAddress(currentPC);
             if (symbol) {
                 if (this.stack.length === 0) {
-                    this.stack.push({ sp: currentSP, name: symbol.name });
+                    this.stack.push({ sp: currentSP, symbol: symbol.name });
                 } else {
-                    const currentTop = this.stack[this.stack.length - 1];
-                    if (currentSP <= currentTop.sp && symbol.name !== currentTop.name) {
-                        currentTop.name = symbol.name;
+                    const top = this.stack[this.stack.length - 1];
+                    if (currentSP <= top.sp) {
+                        if (symbol.name.startsWith('@')) {
+                            top.cheapLabel = symbol.name;
+                        } else if (symbol.name !== top.symbol) {
+                            // Replace the entry with a new one to clear cheapLabel
+                            this.stack[this.stack.length - 1] = { sp: top.sp, symbol: symbol.name };
+                        }
                     }
                 }
             }
+        }
+    }
+
+    public printReport(): void {
+        const DEFAULT_FUNCTION = "(startup)"; // Redeclare for simplicity or import if possible
+
+        process.stdout.write("\nProfiling Report:\npath,name,cycles,cycles_with_children\n");
+
+        // Print (startup) separately
+        const startupCycles = this.cycleCounts.get(DEFAULT_FUNCTION) || 0;
+        process.stdout.write(`${DEFAULT_FUNCTION},${DEFAULT_FUNCTION},${startupCycles},${this.totalCycles}\n`);
+
+        // Get all paths except (startup)
+        const paths = Array.from(this.cycleCounts.keys()).filter(p => p !== DEFAULT_FUNCTION);
+        
+        // Calculate total cycles for each path (self + all children)
+        const pathTotalCycles = new Map<string, number>();
+        for (const path of paths) {
+            let total = 0;
+            for (const otherPath of paths) {
+                if (otherPath === path || otherPath.startsWith(path + '/')) {
+                    total += this.cycleCounts.get(otherPath) || 0;
+                }
+            }
+            pathTotalCycles.set(path, total);
+        }
+
+        // Sort by total cycles descending
+        const sortedPaths = paths.sort((a, b) => (pathTotalCycles.get(b) || 0) - (pathTotalCycles.get(a) || 0));
+
+        for (const path of sortedPaths) {
+            const funcName = path.split('/').pop() || "";
+            const self = this.cycleCounts.get(path) || 0;
+            const total = pathTotalCycles.get(path) || 0;
+            process.stdout.write(`${path},${funcName},${self},${total}\n`);
         }
     }
 
@@ -91,9 +135,5 @@ export class FunctionalProfiler implements Profiler {
         this.stack = [];
         this.cycleCounts.clear();
         this.cycleCounts.set(DEFAULT_FUNCTION, 0);
-    }
-
-    public getReport(): Map<string, number> {
-        return this.cycleCounts;
     }
 }
