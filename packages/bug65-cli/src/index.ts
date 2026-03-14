@@ -142,12 +142,39 @@ function main() {
 
         host.onExit = (code) => {
             if (profileMode && cpu && cpu.profiler.kind === 'functional') {
-                const report = (cpu.profiler as FunctionalProfiler).getReport();
-                process.stdout.write("\nProfiling Report (Function, Cycles):\n");
-                // Sort by cycles descending
-                const sorted = Array.from(report.entries()).sort((a, b) => b[1] - a[1]);
-                for (const [name, cycles] of sorted) {
-                    process.stdout.write(`${name},${cycles}\n`);
+                const functionalProfiler = cpu.profiler as FunctionalProfiler;
+                const report = functionalProfiler.getReport();
+                const DEFAULT_FUNCTION = "(startup)"; // Redeclare for simplicity or import if possible
+
+                process.stdout.write("\nProfiling Report:\npath,name,cycles,cycles_with_children\n");
+
+                // Print (startup) separately
+                const startupCycles = report.get(DEFAULT_FUNCTION) || 0;
+                process.stdout.write(`${DEFAULT_FUNCTION},${DEFAULT_FUNCTION},${startupCycles},${functionalProfiler.totalCycles}\n`);
+
+                // Get all paths except (startup)
+                const paths = Array.from(report.keys()).filter(p => p !== DEFAULT_FUNCTION);
+                
+                // Calculate total cycles for each path (self + all children)
+                const pathTotalCycles = new Map<string, number>();
+                for (const path of paths) {
+                    let total = 0;
+                    for (const otherPath of paths) {
+                        if (otherPath === path || otherPath.startsWith(path + '/')) {
+                            total += report.get(otherPath) || 0;
+                        }
+                    }
+                    pathTotalCycles.set(path, total);
+                }
+
+                // Sort by total cycles descending
+                const sortedPaths = paths.sort((a, b) => (pathTotalCycles.get(b) || 0) - (pathTotalCycles.get(a) || 0));
+
+                for (const path of sortedPaths) {
+                    const funcName = path.split('/').pop() || "";
+                    const self = report.get(path) || 0;
+                    const total = pathTotalCycles.get(path) || 0;
+                    process.stdout.write(`${path},${funcName},${self},${total}\n`);
                 }
             }
             process.exit(code);
