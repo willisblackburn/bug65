@@ -1,6 +1,8 @@
 
 import { DebugInfoParser } from '../src/debug_info';
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as path from 'path';
 
 console.log("Running DebugInfo Parser Test...");
 
@@ -67,5 +69,18 @@ if (vars[0].offset !== -2) {
     process.exit(1);
 }
 console.log("PASS: Variables parsed.");
+
+// Test resolveSourcePath
+const absolutePath = DebugInfoParser.resolveSourcePath("/tmp/foo.c", "/some/cwd");
+assert.strictEqual(absolutePath, "/tmp/foo.c", "Absolute path should be returned unchanged.");
+
+// Test 2-level lookup: test using existing file debug_sample.c
+const resolved = DebugInfoParser.resolveSourcePath("debug_sample.c", __dirname);
+assert.strictEqual(fs.existsSync(resolved), true, "Should resolve existing file in cwd.");
+
+const parentResolved = DebugInfoParser.resolveSourcePath("debug_sample.c", path.join(__dirname, "data"));
+assert.strictEqual(fs.existsSync(parentResolved), true, "Should resolve existing file in parent of cwd.");
+
+console.log("PASS: resolveSourcePath tests passed.");
 
 console.log("All tests passed.");

@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 function printHelp() {
-    console.log("Usage: bug65 [--trace|-t] [--profile] [--cpu <type>] <program.bin> [start_address_hex]");
+    console.log("Usage: bug65 [--trace|-t] [--profile] [--cpu <type>] [--cwd <dir>] <program.bin> [start_address_hex]");
     console.log("Example: bug65 --trace --profile --cpu 65C02 program.bin 0200");
 }
 
@@ -16,8 +16,8 @@ function main() {
     let specifiedLoadAddr: number | null = null;
     let specifiedCpuType: CpuType | null = null;
     let profileMode: boolean = false;
+    let specifiedCwd: string | null = null;
 
-    // Parse args
     // Parse args
     let dbgFileArg: string | null = null;
     let guestArgs: string[] = [];
@@ -36,6 +36,13 @@ function main() {
             }
         } else if (args[i] === '--profile') {
             profileMode = true;
+        } else if (args[i] === '--cwd') {
+            if (i + 1 < args.length) {
+                specifiedCwd = args[++i];
+            } else {
+                console.error("Error: --cwd requires an argument");
+                process.exit(1);
+            }
         } else if (args[i] === '--dbgfile') {
             if (i + 1 < args.length) {
                 dbgFileArg = args[++i];
@@ -191,6 +198,8 @@ function main() {
             cpu.profiler = new FunctionalProfiler(debugInfo);
         }
 
+        const cwd = specifiedCwd || path.dirname(programPath);
+
         const disassembler = new Disassembler6502(debugInfo, effectiveCpuType);
 
         // Source cache
@@ -205,13 +214,7 @@ function main() {
                 if (debugInfo && debugInfo.files.has(fileId)) {
                     const fileEntry = debugInfo.files.get(fileId);
                     if (fileEntry) {
-                        // Try to resolve path. debugInfo often has relative paths.
-                        // Try relative to dbg file location, then program location.
-                        // Or maybe it is relative to cwd?
-                        let srcPath = fileEntry.name;
-                        if (!path.isAbsolute(srcPath) && dbgPath) {
-                            srcPath = path.resolve(path.dirname(dbgPath), srcPath);
-                        }
+                        const srcPath = DebugInfoParser.resolveSourcePath(fileEntry.name, cwd);
 
                         if (fs.existsSync(srcPath)) {
                             try {

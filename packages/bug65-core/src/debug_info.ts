@@ -1,5 +1,6 @@
 
 import * as fs from 'fs';
+import * as path from 'path';
 
 import IntervalTree from 'node-interval-tree';
 
@@ -555,6 +556,22 @@ export class DebugInfoParser {
         }
 
         return undefined;
+    }
+
+    public static resolveSourcePath(sourcePath: string, cwd: string): string {
+        if (path.isAbsolute(sourcePath)) {
+            return sourcePath;
+        }
+        const candidate = path.join(cwd, sourcePath);
+        if (fs.existsSync(candidate)) {
+            return candidate;
+        }
+        const parentCwd = path.dirname(cwd);
+        const candidate2 = path.join(parentCwd, sourcePath);
+        if (fs.existsSync(candidate2)) {
+            return candidate2;
+        }
+        return candidate;
     }
 }
 

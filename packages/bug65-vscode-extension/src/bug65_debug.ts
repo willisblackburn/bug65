@@ -679,16 +679,7 @@ export class Bug65DebugSession extends LoggingDebugSession {
                 const isLib = this._debugInfo.fileIsLibrary.get(lineInfo.fileId);
 
                 if (textFile && !isLib) {
-                    let sourcePath = textFile.name;
-                    if (!path.isAbsolute(sourcePath)) {
-                        let candidate = path.join(this._cwd, sourcePath);
-                        if (!fs.existsSync(candidate)) {
-                            const parentCwd = path.dirname(this._cwd);
-                            const candidate2 = path.join(parentCwd, sourcePath);
-                            if (fs.existsSync(candidate2)) candidate = candidate2;
-                        }
-                        sourcePath = candidate;
-                    }
+                    let sourcePath = DebugInfoParser.resolveSourcePath(textFile.name, this._cwd);
                     source = new Source(path.basename(sourcePath), sourcePath);
 
                     // Check for C function scope
@@ -912,11 +903,9 @@ export class Bug65DebugSession extends LoggingDebugSession {
     private getFileId(filePath: string): number {
         if (!this._debugInfo) return -1;
         // Map absolute path to debug info file entry
-        // Debug info usually has relative paths or basenames.
         for (const [id, file] of this._debugInfo.files) {
-            // Check if name matches basename (hacky but works for flat projects)
-            // Or check if filePath ends with file.name
-            if (filePath === file.name || filePath.endsWith("/" + file.name)) {
+            const resolvedPath = DebugInfoParser.resolveSourcePath(file.name, this._cwd);
+            if (filePath === resolvedPath || filePath === file.name || filePath.endsWith("/" + file.name)) {
                 return id;
             }
         }
